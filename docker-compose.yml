@@ -34,7 +34,7 @@ services:
       server:
         condition: service_healthy
     ports:
-      - '8080:80'
+      - '${PUBLIC_BIND_ADDRESS:-0.0.0.0}:${PUBLIC_PORT:-8082}:80'
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1/']
       interval: 10s

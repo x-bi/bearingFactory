@@ -215,9 +215,6 @@ echo "Synchronizing local code with origin/$BRANCH..."
 
 git reset --hard "origin/$BRANCH"
 
-# Keep ignored production data such as .env, database files and uploads.
-git clean -fd
-
 CURRENT_COMMIT="$(git rev-parse HEAD)"
 
 echo "Code synchronized successfully."
