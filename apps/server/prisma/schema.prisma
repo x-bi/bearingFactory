@@ -1,0 +1,168 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            Int               @id @default(autoincrement())
+  username      String            @unique
+  passwordHash  String
+  name          String
+  role          String            @default("USER")
+  isActive      Boolean           @default(true)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  createdOrders ProductionOrder[] @relation("OrderCreator")
+  transfers     Transfer[]
+  operationLogs OperationLog[]
+}
+
+model WorkshopLayout {
+  id             Int           @id @default(autoincrement())
+  name           String
+  imagePath      String
+  originalWidth  Int?
+  originalHeight Int?
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  workstations   Workstation[]
+}
+
+model Process {
+  id             Int           @id @default(autoincrement())
+  code           String        @unique
+  name           String
+  sort           Int
+  enabled        Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  workstations   Workstation[]
+  tasks          ProcessTask[]
+  startedBatches Batch[]       @relation("BatchStartProcess")
+
+  @@index([sort])
+}
+
+model Workstation {
+  id        Int            @id @default(autoincrement())
+  layoutId  Int
+  processId Int?
+  code      String         @unique
+  name      String
+  type      String
+  x         Float
+  y         Float
+  width     Float?
+  height    Float?
+  enabled   Boolean        @default(true)
+  sort      Int            @default(0)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  layout    WorkshopLayout @relation(fields: [layoutId], references: [id])
+  process   Process?       @relation(fields: [processId], references: [id])
+  tasks     ProcessTask[]
+
+  @@index([layoutId])
+  @@index([processId])
+}
+
+model ProductionOrder {
+  id          Int      @id @default(autoincrement())
+  orderNo     String   @unique
+  model       String
+  customer    String
+  quantity    Int
+  dueDate     DateTime?
+  status      String   @default("UNSCHEDULED")
+  remark      String?
+  createdById Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   User     @relation("OrderCreator", fields: [createdById], references: [id])
+  batches     Batch[]
+
+  @@index([status])
+  @@index([model])
+  @@index([customer])
+  @@index([dueDate])
+}
+
+model Batch {
+  id             Int             @id @default(autoincrement())
+  orderId        Int
+  startProcessId Int
+  batchNo        String
+  quantity       Int
+  status         String          @default("UNSCHEDULED")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  order          ProductionOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  startProcess   Process         @relation("BatchStartProcess", fields: [startProcessId], references: [id])
+  tasks          ProcessTask[]
+  transfers      Transfer[]
+
+  @@unique([orderId, batchNo])
+  @@index([startProcessId])
+  @@index([status])
+}
+
+model ProcessTask {
+  id                Int          @id @default(autoincrement())
+  batchId           Int
+  processId         Int
+  workstationId     Int?
+  plannedQuantity   Int
+  completedQuantity Int          @default(0)
+  status            String       @default("PENDING")
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  batch             Batch        @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  process           Process      @relation(fields: [processId], references: [id])
+  workstation       Workstation? @relation(fields: [workstationId], references: [id])
+  outgoingTransfers Transfer[]   @relation("TransferFromTask")
+  incomingTransfers Transfer[]   @relation("TransferToTask")
+
+  @@index([batchId, processId])
+  @@index([workstationId, status])
+  @@index([status])
+}
+
+model Transfer {
+  id         Int         @id @default(autoincrement())
+  requestId  String      @unique
+  batchId    Int
+  fromTaskId Int
+  toTaskId   Int
+  quantity   Int
+  operatorId Int
+  createdAt  DateTime    @default(now())
+  batch      Batch       @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  fromTask   ProcessTask @relation("TransferFromTask", fields: [fromTaskId], references: [id])
+  toTask     ProcessTask @relation("TransferToTask", fields: [toTaskId], references: [id])
+  operator   User        @relation(fields: [operatorId], references: [id])
+
+  @@index([fromTaskId])
+  @@index([toTaskId])
+  @@index([batchId])
+}
+
+model OperationLog {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  action     String
+  entityType String
+  entityId   Int?
+  payload    String?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}

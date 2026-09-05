@@ -1,0 +1,19 @@
+{
+  "name": "bearing-factory",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @bearing-factory/web --filter @bearing-factory/server dev",
+    "build": "pnpm --filter @bearing-factory/shared build && pnpm --filter @bearing-factory/server prisma:generate && pnpm --filter @bearing-factory/server build && pnpm --filter @bearing-factory/web build",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm --filter @bearing-factory/shared typecheck && pnpm --filter @bearing-factory/server typecheck && pnpm --filter @bearing-factory/web typecheck",
+    "db:backup": "node scripts/backup-sqlite.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2"
+  }
+}
