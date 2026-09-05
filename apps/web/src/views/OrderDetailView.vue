@@ -16,6 +16,7 @@ import {
   type WorkstationItem,
 } from '@/api/flow'
 import { getApiErrorMessage } from '@/utils/api-error'
+import { createRequestId } from '@/utils/request-id'
 
 const route = useRoute()
 const order = ref<ProductionOrderItem>()
@@ -104,7 +105,7 @@ async function submitTransfer() {
   if (!task || !transfer.targetWorkstationId) return
   await run('转序完成，下一工序已生成待加工任务', () =>
     transferTask(task.id, {
-      requestId: crypto.randomUUID(),
+      requestId: createRequestId(),
       quantity: Number(transfer.quantity),
       targetWorkstationId: Number(transfer.targetWorkstationId),
     }),
