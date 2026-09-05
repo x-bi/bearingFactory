@@ -98,6 +98,10 @@ onMounted(load)
             <dd>{{ order.quantity }}</dd>
           </div>
           <div>
+            <dt>交期</dt>
+            <dd>{{ order.dueDate?.slice(0, 10) ?? '未设置' }}</dd>
+          </div>
+          <div>
             <dt>批次</dt>
             <dd>{{ order.batches[0]?.batchNo ?? '--' }}</dd>
           </div>

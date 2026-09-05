@@ -50,9 +50,17 @@ const nextProcess = computed(() => {
         .sort((a, b) => a.sort - b.sort)[0]
     : undefined
 })
-const targetStations = computed(() =>
-  workstations.value.filter((item) => item.processId === nextProcess.value?.id),
-)
+const targetStations = computed(() => {
+  const stations = workstations.value.filter(
+    (item) => item.processId === nextProcess.value?.id,
+  )
+  const buffers = stations.filter((item) => item.type === 'BUFFER')
+  return buffers.length ? buffers : stations
+})
+
+function isShippingTask(task: ProcessTaskItem) {
+  return task.process.code === 'SHIPPING'
+}
 
 async function load() {
   loading.value = true
@@ -226,12 +234,12 @@ onMounted(load)
               type="button"
               :disabled="actionLoading"
               @click="
-                run('完成数量已更新', () =>
+                run(isShippingTask(task) ? '发货数量已更新' : '完成数量已更新', () =>
                   updateCompleted(task.id, Number(quantities[task.id])),
                 )
               "
             >
-              更新完成量
+              {{ isShippingTask(task) ? '更新发货量' : '更新完成量' }}
             </button>
           </div>
           <div class="action-grid">
@@ -241,9 +249,13 @@ onMounted(load)
               "
               type="button"
               :disabled="actionLoading"
-              @click="run('任务已开始', () => taskAction(task.id, 'start'))"
+              @click="
+                run(isShippingTask(task) ? '发货已开始' : '任务已开始', () =>
+                  taskAction(task.id, 'start'),
+                )
+              "
             >
-              开始加工
+              {{ isShippingTask(task) ? '开始发货' : '开始加工' }}
             </button>
             <button
               v-if="task.status === 'PROCESSING'"
@@ -282,10 +294,12 @@ onMounted(load)
               type="button"
               :disabled="actionLoading"
               @click="
-                run('本工序已完成', () => taskAction(task.id, 'complete'))
+                run(isShippingTask(task) ? '本批发货已确认' : '本工序已完成', () =>
+                  taskAction(task.id, 'complete'),
+                )
               "
             >
-              完成本工序
+              {{ isShippingTask(task) ? '确认本批发货' : '完成本工序' }}
             </button>
           </div>
         </article>

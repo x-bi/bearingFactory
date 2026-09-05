@@ -232,14 +232,29 @@ export class ProcessTasksService {
         })
         if (!nextProcess) throw new BadRequestException('当前已是最后一道工序')
 
+        const nextProcessHasBuffer = await tx.workstation.count({
+          where: {
+            processId: nextProcess.id,
+            enabled: true,
+            type: 'BUFFER',
+          },
+        })
+
         const target = await tx.workstation.findFirst({
           where: {
             id: dto.targetWorkstationId,
             processId: nextProcess.id,
             enabled: true,
+            ...(nextProcessHasBuffer > 0 ? { type: 'BUFFER' } : {}),
           },
         })
-        if (!target) throw new BadRequestException('目标工作位置不属于下一工序')
+        if (!target) {
+          throw new BadRequestException(
+            nextProcessHasBuffer > 0
+              ? '下一工序必须先转入待加工区'
+              : '目标工作位置不属于下一工序',
+          )
+        }
 
         const transferred = task.outgoingTransfers.reduce(
           (sum, transfer) => sum + transfer.quantity,

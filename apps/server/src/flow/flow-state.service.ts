@@ -15,7 +15,8 @@ export class FlowStateService {
     })
 
     const shippingTasks = batch.tasks.filter(
-      (task) => task.process.code === 'SHIPPING',
+      (task) =>
+        task.process.code === 'SHIPPING' && task.status === 'COMPLETED',
     )
     const shipped = shippingTasks.reduce(
       (sum, task) => sum + task.completedQuantity,

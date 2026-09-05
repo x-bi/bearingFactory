@@ -158,9 +158,18 @@ onMounted(load)
               v-if="task.status === 'PENDING' && station.type !== 'BUFFER'"
               type="button"
               :disabled="actionLoading"
-              @click="run('任务已开始', () => taskAction(task.id, 'start'))"
+              @click="
+                run(
+                  station.process?.code === 'SHIPPING'
+                    ? '发货已开始'
+                    : '任务已开始',
+                  () => taskAction(task.id, 'start'),
+                )
+              "
             >
-              开始加工
+              {{
+                station.process?.code === 'SHIPPING' ? '开始发货' : '开始加工'
+              }}
             </button>
             <button
               v-if="task.status === 'PROCESSING'"

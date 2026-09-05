@@ -57,14 +57,17 @@ export async function seedDatabase() {
   )
   const stations = [
     ['CASTING_AREA', '浇铸区', 'AREA', 'CASTING', 72, 10, 22, 34],
+    ['ROUGH_BUFFER', '待粗车区', 'BUFFER', 'ROUGH_TURNING', 39, 10, 23, 12],
     ['ROUGH_01', '粗车1', 'DEVICE', 'ROUGH_TURNING', 52, 28, 10, 12],
     ['ROUGH_02', '粗车2', 'DEVICE', 'ROUGH_TURNING', 39, 28, 10, 12],
+    ['FINISH_BUFFER', '待精车区', 'BUFFER', 'FINISH_TURNING', 13, 10, 23, 12],
     ['FINISH_01', '精车1', 'DEVICE', 'FINISH_TURNING', 26, 28, 10, 12],
     ['FINISH_02', '精车2', 'DEVICE', 'FINISH_TURNING', 13, 28, 10, 12],
     ['BORING_01', '镗床1', 'DEVICE', 'BORING', 13, 48, 10, 12],
     ['BORING_BUFFER', '待镗区', 'BUFFER', 'BORING', 35, 48, 22, 16],
     ['DEBURRING_AREA', '去毛刺区', 'AREA', 'DEBURRING', 8, 70, 24, 22],
     ['PACKAGING_AREA', '包装区', 'AREA', 'PACKAGING', 38, 70, 24, 22],
+    ['SHIPPING_AREA', '发货区', 'AREA', 'SHIPPING', 68, 48, 24, 16],
     ['SHIPPING_BUFFER', '待发货区', 'BUFFER', 'SHIPPING', 68, 70, 24, 22],
   ] as const
 

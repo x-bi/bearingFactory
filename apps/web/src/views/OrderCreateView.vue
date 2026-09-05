@@ -29,12 +29,21 @@ const form = reactive({
 const selectedProcess = computed(() =>
   processes.value.find((item) => item.id === form.startProcessId),
 )
+const selectableWorkstations = computed(() => {
+  const buffers = workstations.value.filter((item) => item.type === 'BUFFER')
+  return buffers.length ? buffers : workstations.value
+})
+const hasProcessBuffer = computed(() =>
+  workstations.value.some((item) => item.type === 'BUFFER'),
+)
 
 async function loadWorkstations() {
   form.startWorkstationId = 0
   workstations.value = selectedProcess.value
     ? await getWorkstations(selectedProcess.value.code)
     : []
+  form.startWorkstationId =
+    workstations.value.find((item) => item.type === 'BUFFER')?.id ?? 0
 }
 
 async function submit() {
@@ -129,15 +138,21 @@ onMounted(async () => {
       <label
         ><span>起始工作位置</span
         ><select v-model.number="form.startWorkstationId">
-          <option :value="0">暂不分配</option>
+          <option :value="0">
+            {{ hasProcessBuffer ? '自动进入待加工区' : '暂不分配' }}
+          </option>
           <option
-            v-for="station in workstations"
+            v-for="station in selectableWorkstations"
             :key="station.id"
             :value="station.id"
           >
             {{ station.name }} · {{ station.type }}
           </option></select
-        ><small>暂不分配时任务保持“未排产”，可在详情中分配。</small></label
+        ><small>{{
+          hasProcessBuffer
+            ? '配置待加工区的工序必须先进入待加工区，再分配到设备。'
+            : '暂不分配时任务保持“未排产”，可在详情中分配。'
+        }}</small></label
       >
       <label
         ><span>备注</span
