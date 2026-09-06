@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common'
+import { BadRequestException, ConflictException } from '@nestjs/common'
 import { FlowStateService } from '../flow/flow-state.service'
 import { PrismaService } from '../prisma/prisma.service'
 import { ProductionOrdersService } from '../production-orders/production-orders.service'
@@ -230,6 +230,59 @@ describe('production flow integration', () => {
         where: { id: order.id },
       })).status,
     ).toBe('COMPLETED')
+  })
+
+  it('releases a workstation while paused and blocks conflicting resume', async () => {
+    const createOrder = (model: string, batchNo: string) =>
+      orders.create(
+        {
+          model,
+          customer: '位置切换测试客户',
+          quantity: 100,
+          batchNo,
+          startProcessId: packagingProcessId,
+          startWorkstationId: packagingStationId,
+        },
+        adminId,
+      )
+
+    const first = await createOrder('FIRST', 'SWITCH-001')
+    const second = await createOrder('SECOND', 'SWITCH-002')
+    const third = await createOrder('THIRD', 'SWITCH-003')
+    const firstTaskId = first.batches[0].tasks[0].id
+    const secondTaskId = second.batches[0].tasks[0].id
+    const thirdTaskId = third.batches[0].tasks[0].id
+
+    await tasks.start(firstTaskId, adminId)
+    await tasks.pause(firstTaskId, adminId)
+    await tasks.start(secondTaskId, adminId)
+
+    await expect(tasks.resume(firstTaskId, adminId)).rejects.toBeInstanceOf(
+      ConflictException,
+    )
+    await expect(tasks.start(thirdTaskId, adminId)).rejects.toBeInstanceOf(
+      ConflictException,
+    )
+
+    const occupiedStation = await workstations.detail(packagingStationId)
+    expect(occupiedStation.displayStatus).toBe('PROCESSING')
+    expect(
+      occupiedStation.tasks.find((task) => task.id === firstTaskId)?.status,
+    ).toBe('PAUSED')
+
+    await tasks.pause(secondTaskId, adminId)
+    await tasks.resume(firstTaskId, adminId)
+
+    expect(
+      (await prisma.processTask.findUniqueOrThrow({
+        where: { id: firstTaskId },
+      })).status,
+    ).toBe('PROCESSING')
+    expect(
+      (await prisma.processTask.findUniqueOrThrow({
+        where: { id: secondTaskId },
+      })).status,
+    ).toBe('PAUSED')
   })
 
   it('orders active production orders by due date and moves completed orders last', async () => {

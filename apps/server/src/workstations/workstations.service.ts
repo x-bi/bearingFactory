@@ -40,9 +40,9 @@ export class WorkstationsService {
     return Promise.all(
       stations.map(async (station) => {
         const activeTask =
-          station.tasks.find((task) =>
-            ['PROCESSING', 'PAUSED'].includes(task.status),
-          ) ?? station.tasks[0]
+          station.tasks.find((task) => task.status === 'PROCESSING') ??
+          station.tasks.find((task) => task.status === 'PAUSED') ??
+          station.tasks[0]
         const displayStatus = activeTask
           ? await this.flowState.getDisplayStatus(activeTask)
           : 'EMPTY'
@@ -106,7 +106,8 @@ export class WorkstationsService {
       }),
     )
     const activeTask =
-      tasks.find((task) => ['PROCESSING', 'PAUSED'].includes(task.status)) ??
+      tasks.find((task) => task.status === 'PROCESSING') ??
+      tasks.find((task) => task.status === 'PAUSED') ??
       tasks[0]
     return {
       ...station,

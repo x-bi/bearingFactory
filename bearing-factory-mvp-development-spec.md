@@ -15,7 +15,7 @@
 3. 完成数量、任务完成、转序是三个独立业务动作：`update-completed` 只改数量，`complete` 只结束已全部加工的任务，`transfer` 只转出已完成且未转出的数量。
 4. `COMPLETED` 任务如仍有可转数量，允许继续转序。
 5. 全局进度采用适用工序的加工完成量加权计算，仅用于展示，不参与状态判断。
-6. 一台工作位置同一时刻只允许一个 `PROCESSING/PAUSED` 活动任务；开始加工时由后端重新校验。
+6. 一台工作位置同一时刻只允许一个 `PROCESSING` 任务；`PAUSED` 任务释放位置，开始或恢复加工时均由后端重新校验。
 7. 当前缺少真实车间布局图，开发阶段允许使用简化占位布局；真实布局到位后再校准热点，地图位置验收在此之前不视为完成。
 
 ---
@@ -321,13 +321,13 @@ PC 后续改为 Sidebar + Header，但仍使用同一路由和业务页面。
 
 当工作位置无任务时显示空闲状态。
 
-V0.1 同一设备允许存在多个 `PENDING` 任务，但只允许一个 `PROCESSING/PAUSED` 活动任务。该规则由后端 Service 校验。
+V0.1 同一设备允许存在多个 `PENDING` 和 `PAUSED` 任务，但同一时刻只允许一个 `PROCESSING` 任务。暂停会释放工作位置；开始或恢复时由后端 Service 重新校验。
 
 补充规则：
 
 - `BUFFER` 上的任务只允许查看和重新分配，不显示“开始加工”。
 - `assign` 既可将 `UNSCHEDULED` 任务分配到工作位置，也可将 `PENDING@BUFFER` 移动到同工序的 `DEVICE/AREA`。
-- `start` 必须校验目标工作位置类型不是 `BUFFER`，并在写事务中确认不存在其他活动任务。
+- `start` / `resume` 必须校验目标工作位置类型不是 `BUFFER`，并在写事务中确认不存在其他 `PROCESSING` 任务。
 - “转下一工序”只在 `availableToTransfer > 0` 时可用，不自动增加完成数量。
 - “完成本工序”只在 `completedQuantity == plannedQuantity` 时可用。
 
@@ -542,7 +542,7 @@ SUM(completedQuantity)
 跨工序加工中 > 加工中 > 暂停 > 待加工 > 空闲
 ```
 
-但后端同时限制同一工作位置只能存在一个 `PROCESSING/PAUSED` 活动任务，因此不会出现多个活动状态互相冲突。
+同一工作位置可同时保留多个暂停任务，但只能存在一个 `PROCESSING` 任务；位置主状态按上述优先级选择。
 
 ---
 
@@ -1285,7 +1285,9 @@ POST /api/process-tasks/:id/complete
 动作语义：
 
 - `assign`：支持 `UNSCHEDULED -> PENDING`，以及 `PENDING@BUFFER -> PENDING@DEVICE/AREA`；目标位置必须属于当前工序。
-- `start`：仅允许 `PENDING@DEVICE/AREA -> PROCESSING`，并重新校验工作位置活动任务唯一性。
+- `start`：仅允许 `PENDING@DEVICE/AREA -> PROCESSING`，并重新校验工作位置不存在其他 `PROCESSING` 任务。
+- `pause`：允许 `PROCESSING -> PAUSED` 并释放工作位置。
+- `resume`：仅允许 `PAUSED -> PROCESSING`，并重新校验工作位置不存在其他 `PROCESSING` 任务。
 - `update-completed`：只修改累计完成数量，不自动完成、不自动转序。
 - `complete`：仅允许 `completedQuantity == plannedQuantity` 的 `PROCESSING/PAUSED` Task 进入 `COMPLETED`。
 - `transfer`：允许从 `PROCESSING/PAUSED/COMPLETED` Task 转出可转数量；不修改 `completedQuantity`。

@@ -66,6 +66,21 @@ export class ProcessTasksService {
     }
   }
 
+  private async ensureWorkstationAvailable(
+    tx: Prisma.TransactionClient,
+    taskId: number,
+    workstationId: number,
+  ) {
+    const occupied = await tx.processTask.findFirst({
+      where: {
+        id: { not: taskId },
+        workstationId,
+        status: 'PROCESSING',
+      },
+    })
+    if (occupied) throw new ConflictException('该工作位置已有加工中的任务')
+  }
+
   assign(id: number, dto: AssignTaskDto, userId: number) {
     return this.prisma.$transaction(async (tx) => {
       const task = await this.findTask(tx, id)
@@ -106,14 +121,7 @@ export class ProcessTasksService {
         throw new BadRequestException('任务必须先分配到设备或加工区域')
       }
 
-      const occupied = await tx.processTask.findFirst({
-        where: {
-          id: { not: id },
-          workstationId: task.workstation.id,
-          status: { in: ACTIVE_STATUSES },
-        },
-      })
-      if (occupied) throw new ConflictException('该工作位置已有加工中的任务')
+      await this.ensureWorkstationAvailable(tx, id, task.workstation.id)
 
       const updated = await tx.processTask.update({
         where: { id },
@@ -144,6 +152,12 @@ export class ProcessTasksService {
       const task = await this.findTask(tx, id)
       if (task.status !== from) {
         throw new BadRequestException(`任务状态必须为 ${from}`)
+      }
+      if (to === 'PROCESSING') {
+        if (!task.workstation || task.workstation.type === 'BUFFER') {
+          throw new BadRequestException('任务必须先分配到设备或加工区域')
+        }
+        await this.ensureWorkstationAvailable(tx, id, task.workstation.id)
       }
       const updated = await tx.processTask.update({
         where: { id },
