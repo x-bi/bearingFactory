@@ -53,10 +53,7 @@ export class ProductionOrdersService {
       })
 
       const pageIds = rankedOrders
-        .slice(
-          (query.page - 1) * query.pageSize,
-          query.page * query.pageSize,
-        )
+        .slice((query.page - 1) * query.pageSize, query.page * query.pageSize)
         .map((item) => item.id)
       const unorderedItems = await tx.productionOrder.findMany({
         where: { id: { in: pageIds } },
@@ -183,7 +180,7 @@ export class ProductionOrdersService {
               include: {
                 process: true,
                 workstation: true,
-                outgoingTransfers: { select: { quantity: true } },
+                outgoingTransfers: true,
               },
             },
             transfers: {
@@ -191,6 +188,14 @@ export class ProductionOrdersService {
               include: {
                 fromTask: { include: { process: true } },
                 toTask: { include: { process: true, workstation: true } },
+                operator: { select: { id: true, name: true } },
+              },
+            },
+            scrapRecords: {
+              orderBy: { createdAt: 'desc' },
+              include: {
+                process: true,
+                workstation: true,
                 operator: { select: { id: true, name: true } },
               },
             },
@@ -202,20 +207,59 @@ export class ProductionOrdersService {
 
     return {
       ...order,
-      batches: order.batches.map((batch) => ({
-        ...batch,
-        tasks: batch.tasks.map((task) => {
-          const transferredQuantity = task.outgoingTransfers.reduce(
-            (sum, transfer) => sum + transfer.quantity,
-            0,
-          )
+      batches: order.batches.map((batch) => {
+        const tasks = batch.tasks.map((task) => {
+          const transferredQuantity = task.outgoingTransfers
+            .filter((transfer) => transfer.kind === 'NEXT_PROCESS')
+            .reduce((sum, transfer) => sum + transfer.quantity, 0)
+          const assignedOutQuantity = task.outgoingTransfers
+            .filter((transfer) =>
+              ['ASSIGN', 'REASSIGN', 'TO_SURPLUS'].includes(transfer.kind),
+            )
+            .reduce((sum, transfer) => sum + transfer.quantity, 0)
           return {
             ...task,
             transferredQuantity,
+            assignedOutQuantity,
             availableToTransfer: task.completedQuantity - transferredQuantity,
+            remainingToProcess:
+              task.plannedQuantity -
+              task.completedQuantity -
+              task.scrappedQuantity -
+              assignedOutQuantity,
           }
-        }),
-      })),
+        })
+        const shippedQuantity = tasks
+          .filter(
+            (task) =>
+              task.workstation?.terminalKind === 'SHIPPED' &&
+              task.status === 'COMPLETED',
+          )
+          .reduce((sum, task) => sum + task.completedQuantity, 0)
+        const surplusQuantity = tasks
+          .filter((task) => task.workstation?.terminalKind === 'SURPLUS')
+          .reduce((sum, task) => sum + task.completedQuantity, 0)
+        const scrappedQuantity = tasks.reduce(
+          (sum, task) => sum + task.scrappedQuantity,
+          0,
+        )
+        return {
+          ...batch,
+          tasks,
+          quantitySummary: {
+            shippedQuantity,
+            surplusQuantity,
+            scrappedQuantity,
+            activeQuantity: Math.max(
+              0,
+              batch.quantity -
+                shippedQuantity -
+                surplusQuantity -
+                scrappedQuantity,
+            ),
+          },
+        }
+      }),
     }
   }
 }

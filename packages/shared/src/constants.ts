@@ -14,6 +14,23 @@ export const WorkstationType = {
   BUFFER: 'BUFFER',
 } as const
 
+export const ProcessExecutionMode = {
+  MACHINE: 'MACHINE',
+  AREA: 'AREA',
+} as const
+
+export const TerminalKind = {
+  SHIPPED: 'SHIPPED',
+  SURPLUS: 'SURPLUS',
+} as const
+
+export const TransferKind = {
+  NEXT_PROCESS: 'NEXT_PROCESS',
+  ASSIGN: 'ASSIGN',
+  REASSIGN: 'REASSIGN',
+  TO_SURPLUS: 'TO_SURPLUS',
+} as const
+
 export const TaskStatus = {
   UNSCHEDULED: 'UNSCHEDULED',
   PENDING: 'PENDING',
@@ -33,5 +50,8 @@ export const DisplayStatus = {
 export type ValueOf<T> = T[keyof T]
 export type ProcessCodeValue = ValueOf<typeof ProcessCode>
 export type WorkstationTypeValue = ValueOf<typeof WorkstationType>
+export type ProcessExecutionModeValue = ValueOf<typeof ProcessExecutionMode>
+export type TerminalKindValue = ValueOf<typeof TerminalKind>
+export type TransferKindValue = ValueOf<typeof TransferKind>
 export type TaskStatusValue = ValueOf<typeof TaskStatus>
 export type DisplayStatusValue = ValueOf<typeof DisplayStatus>

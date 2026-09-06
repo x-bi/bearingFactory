@@ -18,6 +18,7 @@ model User {
   updatedAt     DateTime          @updatedAt
   createdOrders ProductionOrder[] @relation("OrderCreator")
   transfers     Transfer[]
+  scrapRecords  ScrapRecord[]
   operationLogs OperationLog[]
 }
 
@@ -38,11 +39,13 @@ model Process {
   code           String        @unique
   name           String
   sort           Int
+  executionMode  String        @default("AREA")
   enabled        Boolean       @default(true)
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
   workstations   Workstation[]
   tasks          ProcessTask[]
+  scrapRecords   ScrapRecord[]
   startedBatches Batch[]       @relation("BatchStartProcess")
 
   @@index([sort])
@@ -55,6 +58,7 @@ model Workstation {
   code      String         @unique
   name      String
   type      String
+  terminalKind String?
   x         Float
   y         Float
   width     Float?
@@ -66,6 +70,7 @@ model Workstation {
   layout    WorkshopLayout @relation(fields: [layoutId], references: [id])
   process   Process?       @relation(fields: [processId], references: [id])
   tasks     ProcessTask[]
+  scrapRecords ScrapRecord[]
 
   @@index([layoutId])
   @@index([processId])
@@ -105,6 +110,7 @@ model Batch {
   startProcess   Process         @relation("BatchStartProcess", fields: [startProcessId], references: [id])
   tasks          ProcessTask[]
   transfers      Transfer[]
+  scrapRecords   ScrapRecord[]
 
   @@unique([orderId, batchNo])
   @@index([startProcessId])
@@ -118,6 +124,7 @@ model ProcessTask {
   workstationId     Int?
   plannedQuantity   Int
   completedQuantity Int          @default(0)
+  scrappedQuantity  Int          @default(0)
   status            String       @default("PENDING")
   startedAt         DateTime?
   completedAt       DateTime?
@@ -128,6 +135,7 @@ model ProcessTask {
   workstation       Workstation? @relation(fields: [workstationId], references: [id])
   outgoingTransfers Transfer[]   @relation("TransferFromTask")
   incomingTransfers Transfer[]   @relation("TransferToTask")
+  scrapRecords      ScrapRecord[]
 
   @@index([batchId, processId])
   @@index([workstationId, status])
@@ -141,6 +149,8 @@ model Transfer {
   fromTaskId Int
   toTaskId   Int
   quantity   Int
+  kind       String      @default("NEXT_PROCESS")
+  remark     String?
   operatorId Int
   createdAt  DateTime    @default(now())
   batch      Batch       @relation(fields: [batchId], references: [id], onDelete: Cascade)
@@ -151,6 +161,31 @@ model Transfer {
   @@index([fromTaskId])
   @@index([toTaskId])
   @@index([batchId])
+  @@index([kind, createdAt])
+}
+
+model ScrapRecord {
+  id            Int          @id @default(autoincrement())
+  requestId     String       @unique
+  batchId       Int
+  taskId        Int
+  processId     Int
+  workstationId Int?
+  quantity      Int
+  reason        String
+  remark        String?
+  operatorId    Int
+  createdAt     DateTime     @default(now())
+  batch         Batch        @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  task          ProcessTask  @relation(fields: [taskId], references: [id])
+  process       Process      @relation(fields: [processId], references: [id])
+  workstation   Workstation? @relation(fields: [workstationId], references: [id])
+  operator      User         @relation(fields: [operatorId], references: [id])
+
+  @@index([batchId, createdAt])
+  @@index([taskId])
+  @@index([processId])
+  @@index([workstationId])
 }
 
 model OperationLog {

@@ -7,6 +7,9 @@ import {
   getProcesses,
   getWorkstation,
   getWorkstations,
+  moveTaskToSurplus,
+  reassignTask,
+  scrapTask,
   taskAction,
   transferTask,
   updateCompleted,
@@ -27,8 +30,12 @@ const actionLoading = ref(false)
 const errorMessage = ref('')
 const notice = ref('')
 const assignStations = reactive<Record<number, number>>({})
+const assignQuantities = reactive<Record<number, number>>({})
 const quantities = reactive<Record<number, number>>({})
 const transfer = reactive({ taskId: 0, quantity: 0, targetWorkstationId: 0 })
+const reassign = reactive({ taskId: 0, quantity: 0, targetWorkstationId: 0 })
+const scrap = reactive({ taskId: 0, quantity: 0, reason: '', remark: '' })
+const surplus = reactive({ taskId: 0, quantity: 0, remark: '' })
 
 const statusLabels: Record<string, string> = {
   EMPTY: '空闲',
@@ -50,10 +57,26 @@ const queuedTasks = computed(
   () => station.value?.tasks.filter((task) => task.status === 'PENDING') ?? [],
 )
 const processStations = computed(() =>
-  workstations.value.filter((item) => item.processId === station.value?.processId),
+  workstations.value.filter(
+    (item) => item.processId === station.value?.processId,
+  ),
 )
 const transferTaskItem = computed(() =>
   station.value?.tasks.find((item) => item.id === transfer.taskId),
+)
+const reassignTaskItem = computed(() =>
+  station.value?.tasks.find((item) => item.id === reassign.taskId),
+)
+const scrapTaskItem = computed(() =>
+  station.value?.tasks.find((item) => item.id === scrap.taskId),
+)
+const surplusTaskItem = computed(() =>
+  station.value?.tasks.find((item) => item.id === surplus.taskId),
+)
+const reassignStations = computed(() =>
+  processStations.value.filter(
+    (item) => item.type === 'DEVICE' && item.id !== station.value?.id,
+  ),
 )
 const nextProcess = computed(() => {
   const current = transferTaskItem.value?.process
@@ -86,7 +109,10 @@ async function load(showLoading = true) {
     ])
     for (const task of station.value.tasks) {
       assignStations[task.id] =
-        processStations.value.find((item) => item.type !== 'BUFFER')?.id ?? 0
+        processStations.value.find(
+          (item) => item.type !== 'BUFFER' && item.terminalKind !== 'SURPLUS',
+        )?.id ?? 0
+      assignQuantities[task.id] = Math.max(1, task.remainingToProcess)
       quantities[task.id] = task.completedQuantity
     }
   } catch (error) {
@@ -131,6 +157,83 @@ async function submitTransfer() {
     }),
   )
   if (succeeded) transfer.taskId = 0
+}
+
+async function submitAssignment(task: WorkstationDetail['tasks'][number]) {
+  const quantity = Number(assignQuantities[task.id])
+  const workstationId = Number(assignStations[task.id])
+  if (!workstationId || quantity < 1) return
+  await run('任务已分批分配', () =>
+    assignTask(task.id, {
+      requestId: createRequestId(),
+      workstationId,
+      quantity,
+    }),
+  )
+}
+
+function openReassign(task: WorkstationDetail['tasks'][number]) {
+  reassign.taskId = task.id
+  reassign.quantity = task.remainingToProcess
+  reassign.targetWorkstationId = reassignStations.value[0]?.id ?? 0
+}
+
+async function submitReassign() {
+  if (!reassignTaskItem.value || !reassign.targetWorkstationId) return
+  const succeeded = await run('任务已改派到同工序机器', () =>
+    reassignTask(reassign.taskId, {
+      requestId: createRequestId(),
+      targetWorkstationId: Number(reassign.targetWorkstationId),
+      quantity: Number(reassign.quantity),
+    }),
+  )
+  if (succeeded) reassign.taskId = 0
+}
+
+function scrapAvailable(task: WorkstationDetail['tasks'][number]) {
+  return station.value?.terminalKind === 'SURPLUS'
+    ? task.completedQuantity
+    : station.value?.terminalKind === 'SHIPPED' && task.status === 'COMPLETED'
+      ? 0
+      : task.remainingToProcess + task.availableToTransfer
+}
+
+function openScrap(task: WorkstationDetail['tasks'][number]) {
+  scrap.taskId = task.id
+  scrap.quantity = scrapAvailable(task)
+  scrap.reason = ''
+  scrap.remark = ''
+}
+
+async function submitScrap() {
+  if (!scrapTaskItem.value || !scrap.reason.trim()) return
+  const succeeded = await run('报废数量已登记', () =>
+    scrapTask(scrap.taskId, {
+      requestId: createRequestId(),
+      quantity: Number(scrap.quantity),
+      reason: scrap.reason.trim(),
+      remark: scrap.remark.trim() || undefined,
+    }),
+  )
+  if (succeeded) scrap.taskId = 0
+}
+
+function openSurplus(task: WorkstationDetail['tasks'][number]) {
+  surplus.taskId = task.id
+  surplus.quantity = task.remainingToProcess
+  surplus.remark = ''
+}
+
+async function submitSurplus() {
+  if (!surplusTaskItem.value) return
+  const succeeded = await run('已转入余品区', () =>
+    moveTaskToSurplus(surplus.taskId, {
+      requestId: createRequestId(),
+      quantity: Number(surplus.quantity),
+      remark: surplus.remark.trim() || undefined,
+    }),
+  )
+  if (succeeded) surplus.taskId = 0
 }
 
 onMounted(load)
@@ -206,11 +309,11 @@ onMounted(load)
             </strong>
           </div>
           <div class="quantity-line">
-            <span
-              >完成 {{ task.completedQuantity }} /
-              {{ task.plannedQuantity }}</span
-            >
-            <span>可转 {{ task.availableToTransfer }}</span>
+            <span>进入 {{ task.plannedQuantity }}</span>
+            <span>合格 {{ task.completedQuantity }}</span>
+            <span>报废 {{ task.scrappedQuantity }}</span>
+            <span>待处理 {{ task.remainingToProcess }}</span>
+            <span>可转序 {{ task.availableToTransfer }}</span>
           </div>
           <div
             v-if="['PROCESSING', 'PAUSED'].includes(task.status)"
@@ -273,8 +376,20 @@ onMounted(load)
             </button>
             <button
               v-if="
-                task.availableToTransfer > 0 &&
-                task.process.code !== 'SHIPPING'
+                task.status === 'PAUSED' &&
+                station.type === 'DEVICE' &&
+                task.remainingToProcess > 0
+              "
+              class="secondary"
+              type="button"
+              :disabled="actionLoading || !reassignStations.length"
+              @click="openReassign(task)"
+            >
+              改派机器
+            </button>
+            <button
+              v-if="
+                task.availableToTransfer > 0 && task.process.code !== 'SHIPPING'
               "
               class="transfer-button"
               type="button"
@@ -286,7 +401,7 @@ onMounted(load)
             <button
               v-if="
                 ['PROCESSING', 'PAUSED'].includes(task.status) &&
-                task.completedQuantity === task.plannedQuantity
+                task.remainingToProcess === 0
               "
               class="complete-button"
               type="button"
@@ -300,6 +415,28 @@ onMounted(load)
             >
               {{ isShippingTask(task) ? '确认本批发货' : '完成本工序' }}
             </button>
+            <button
+              v-if="scrapAvailable(task) > 0"
+              class="danger-button"
+              type="button"
+              :disabled="actionLoading"
+              @click="openScrap(task)"
+            >
+              报废
+            </button>
+            <button
+              v-if="
+                station.code === 'SHIPPING_BUFFER' &&
+                task.status === 'PENDING' &&
+                task.remainingToProcess > 0
+              "
+              class="surplus-button"
+              type="button"
+              :disabled="actionLoading"
+              @click="openSurplus(task)"
+            >
+              转余品区
+            </button>
             <RouterLink :to="`/orders/${task.batch.order.id}`"
               >查看完整生产单</RouterLink
             >
@@ -312,7 +449,8 @@ onMounted(load)
               <option :value="0">选择加工位置</option>
               <option
                 v-for="item in processStations.filter(
-                  (entry) => entry.type !== 'BUFFER',
+                  (entry) =>
+                    entry.type !== 'BUFFER' && entry.terminalKind !== 'SURPLUS',
                 )"
                 :key="item.id"
                 :value="item.id"
@@ -320,16 +458,25 @@ onMounted(load)
                 {{ item.name }}
               </option>
             </select>
+            <input
+              v-model.number="assignQuantities[task.id]"
+              type="number"
+              min="1"
+              :max="task.remainingToProcess"
+              inputmode="numeric"
+              aria-label="分配数量"
+            />
             <button
               type="button"
-              :disabled="actionLoading || !assignStations[task.id]"
-              @click="
-                run('任务已从缓冲区分配', () =>
-                  assignTask(task.id, assignStations[task.id]),
-                )
+              :disabled="
+                actionLoading ||
+                !assignStations[task.id] ||
+                assignQuantities[task.id] < 1 ||
+                assignQuantities[task.id] > task.remainingToProcess
               "
+              @click="submitAssignment(task)"
             >
-              分配
+              分批分配
             </button>
           </div>
         </article>
@@ -352,7 +499,9 @@ onMounted(load)
           </button>
         </header>
         <label>
-          <span>转序数量 · 最多 {{ transferTaskItem.availableToTransfer }}</span>
+          <span
+            >转序数量 · 最多 {{ transferTaskItem.availableToTransfer }}</span
+          >
           <input
             v-model.number="transfer.quantity"
             type="number"
@@ -386,6 +535,144 @@ onMounted(load)
           @click="submitTransfer"
         >
           {{ actionLoading ? '正在转序…' : '确认转序' }}
+        </button>
+      </section>
+
+      <section v-if="reassignTaskItem" class="transfer-panel">
+        <header>
+          <div>
+            <p>REASSIGN</p>
+            <h2>同工序改派机器</h2>
+          </div>
+          <button
+            type="button"
+            aria-label="关闭改派"
+            @click="reassign.taskId = 0"
+          >
+            ×
+          </button>
+        </header>
+        <label
+          ><span>改派数量 · 最多 {{ reassignTaskItem.remainingToProcess }}</span
+          ><input
+            v-model.number="reassign.quantity"
+            type="number"
+            min="1"
+            :max="reassignTaskItem.remainingToProcess"
+            inputmode="numeric"
+        /></label>
+        <label
+          ><span>目标机器</span
+          ><select v-model.number="reassign.targetWorkstationId">
+            <option :value="0">请选择</option>
+            <option
+              v-for="item in reassignStations"
+              :key="item.id"
+              :value="item.id"
+            >
+              {{ item.name }}
+            </option>
+          </select></label
+        >
+        <button
+          class="confirm-transfer"
+          type="button"
+          :disabled="
+            actionLoading ||
+            !reassign.targetWorkstationId ||
+            reassign.quantity < 1 ||
+            reassign.quantity > reassignTaskItem.remainingToProcess
+          "
+          @click="submitReassign"
+        >
+          确认改派
+        </button>
+      </section>
+
+      <section v-if="scrapTaskItem" class="transfer-panel">
+        <header>
+          <div>
+            <p>SCRAP</p>
+            <h2>登记报废</h2>
+          </div>
+          <button type="button" aria-label="关闭报废" @click="scrap.taskId = 0">
+            ×
+          </button>
+        </header>
+        <label
+          ><span>报废数量 · 最多 {{ scrapAvailable(scrapTaskItem) }}</span
+          ><input
+            v-model.number="scrap.quantity"
+            type="number"
+            min="1"
+            :max="scrapAvailable(scrapTaskItem)"
+            inputmode="numeric"
+        /></label>
+        <label
+          ><span>报废原因</span
+          ><input
+            v-model.trim="scrap.reason"
+            type="text"
+            maxlength="200"
+            placeholder="请输入报废原因"
+        /></label>
+        <label
+          ><span>备注（选填）</span
+          ><input v-model.trim="scrap.remark" type="text" maxlength="500"
+        /></label>
+        <button
+          class="confirm-transfer danger-button"
+          type="button"
+          :disabled="
+            actionLoading ||
+            !scrap.reason ||
+            scrap.quantity < 1 ||
+            scrap.quantity > scrapAvailable(scrapTaskItem)
+          "
+          @click="submitScrap"
+        >
+          确认报废
+        </button>
+      </section>
+
+      <section v-if="surplusTaskItem" class="transfer-panel">
+        <header>
+          <div>
+            <p>SURPLUS</p>
+            <h2>转入余品区</h2>
+          </div>
+          <button
+            type="button"
+            aria-label="关闭转余品"
+            @click="surplus.taskId = 0"
+          >
+            ×
+          </button>
+        </header>
+        <label
+          ><span>转入数量 · 最多 {{ surplusTaskItem.remainingToProcess }}</span
+          ><input
+            v-model.number="surplus.quantity"
+            type="number"
+            min="1"
+            :max="surplusTaskItem.remainingToProcess"
+            inputmode="numeric"
+        /></label>
+        <label
+          ><span>备注（选填）</span
+          ><input v-model.trim="surplus.remark" type="text" maxlength="500"
+        /></label>
+        <button
+          class="confirm-transfer surplus-button"
+          type="button"
+          :disabled="
+            actionLoading ||
+            surplus.quantity < 1 ||
+            surplus.quantity > surplusTaskItem.remainingToProcess
+          "
+          @click="submitSurplus"
+        >
+          确认转入余品区
         </button>
       </section>
     </template>
@@ -560,6 +847,8 @@ onMounted(load)
 }
 .quantity-line {
   display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
   justify-content: space-between;
   margin-top: 14px;
   color: var(--color-text-secondary);
@@ -597,6 +886,14 @@ onMounted(load)
 .task-actions button.complete-button {
   background: var(--color-success);
 }
+.task-actions button.danger-button,
+.transfer-panel button.danger-button {
+  background: var(--color-danger);
+}
+.task-actions button.surplus-button,
+.transfer-panel button.surplus-button {
+  background: var(--color-warning);
+}
 .task-actions a {
   background: var(--color-bg-inverse);
 }
@@ -606,6 +903,7 @@ onMounted(load)
   margin-top: 10px;
 }
 .assign-row select,
+.assign-row input,
 .update-row input,
 .transfer-panel input,
 .transfer-panel select {

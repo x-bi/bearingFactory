@@ -10,6 +10,9 @@ import {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 import type { AuthenticatedRequest } from '../auth/auth.types'
 import { AssignTaskDto } from './dto/assign-task.dto'
+import { ReassignTaskDto } from './dto/reassign-task.dto'
+import { ScrapTaskDto } from './dto/scrap-task.dto'
+import { ToSurplusDto } from './dto/to-surplus.dto'
 import { TransferTaskDto } from './dto/transfer-task.dto'
 import { UpdateCompletedDto } from './dto/update-completed.dto'
 import { ProcessTasksService } from './process-tasks.service'
@@ -34,6 +37,33 @@ export class ProcessTasksController {
     @Req() request: AuthenticatedRequest,
   ) {
     return this.service.start(id, request.user.id)
+  }
+
+  @Post(':id/reassign')
+  reassign(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ReassignTaskDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.service.reassign(id, dto, request.user.id)
+  }
+
+  @Post(':id/scrap')
+  scrap(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ScrapTaskDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.service.scrap(id, dto, request.user.id)
+  }
+
+  @Post(':id/to-surplus')
+  toSurplus(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ToSurplusDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.service.toSurplus(id, dto, request.user.id)
   }
 
   @Post(':id/pause')

@@ -39,6 +39,16 @@ const router = createRouter({
       name: 'order-detail',
       component: () => import('@/views/OrderDetailView.vue'),
     },
+    {
+      path: '/surplus',
+      name: 'surplus',
+      component: () => import('@/views/SurplusView.vue'),
+    },
+    {
+      path: '/machines',
+      name: 'machines',
+      component: () => import('@/views/MachinesView.vue'),
+    },
   ],
 })
 

@@ -5,6 +5,7 @@ export interface ProcessItem {
   code: string
   name: string
   sort: number
+  executionMode: 'MACHINE' | 'AREA'
 }
 
 export interface WorkstationItem {
@@ -12,13 +13,16 @@ export interface WorkstationItem {
   code: string
   name: string
   type: 'DEVICE' | 'AREA' | 'BUFFER'
+  terminalKind: 'SHIPPED' | 'SURPLUS' | null
   processId: number | null
   process: ProcessItem | null
   x: number
   y: number
   width: number | null
   height: number | null
+  sort: number
   displayStatus?: string
+  surplusQuantity?: number
   activeTask?: {
     id: number
     orderId: number
@@ -37,6 +41,9 @@ export interface WorkstationDetail extends WorkstationItem {
     status: string
     plannedQuantity: number
     completedQuantity: number
+    scrappedQuantity: number
+    assignedOutQuantity: number
+    remainingToProcess: number
     transferredQuantity: number
     availableToTransfer: number
     displayStatus: string
@@ -61,6 +68,9 @@ export interface ProcessTaskItem {
   workstationId: number | null
   plannedQuantity: number
   completedQuantity: number
+  scrappedQuantity: number
+  assignedOutQuantity: number
+  remainingToProcess: number
   transferredQuantity: number
   availableToTransfer: number
   status: string
@@ -87,11 +97,29 @@ export interface ProductionOrderItem {
     transfers?: Array<{
       id: number
       quantity: number
+      kind: 'NEXT_PROCESS' | 'ASSIGN' | 'REASSIGN' | 'TO_SURPLUS'
+      remark: string | null
       createdAt: string
       fromTask: { process: ProcessItem }
       toTask: { process: ProcessItem; workstation: WorkstationItem | null }
       operator: { id: number; name: string }
     }>
+    scrapRecords?: Array<{
+      id: number
+      quantity: number
+      reason: string
+      remark: string | null
+      createdAt: string
+      process: ProcessItem
+      workstation: WorkstationItem | null
+      operator: { id: number; name: string }
+    }>
+    quantitySummary?: {
+      shippedQuantity: number
+      surplusQuantity: number
+      scrappedQuantity: number
+      activeQuantity: number
+    }
   }>
 }
 
@@ -153,9 +181,37 @@ export async function taskAction(
   return (await http.post(`/process-tasks/${taskId}/${action}`)).data
 }
 
-export async function assignTask(taskId: number, workstationId: number) {
-  return (await http.post(`/process-tasks/${taskId}/assign`, { workstationId }))
-    .data
+export async function assignTask(
+  taskId: number,
+  payload: { requestId: string; workstationId: number; quantity: number },
+) {
+  return (await http.post(`/process-tasks/${taskId}/assign`, payload)).data
+}
+
+export async function reassignTask(
+  taskId: number,
+  payload: { requestId: string; targetWorkstationId: number; quantity: number },
+) {
+  return (await http.post(`/process-tasks/${taskId}/reassign`, payload)).data
+}
+
+export async function scrapTask(
+  taskId: number,
+  payload: {
+    requestId: string
+    quantity: number
+    reason: string
+    remark?: string
+  },
+) {
+  return (await http.post(`/process-tasks/${taskId}/scrap`, payload)).data
+}
+
+export async function moveTaskToSurplus(
+  taskId: number,
+  payload: { requestId: string; quantity: number; remark?: string },
+) {
+  return (await http.post(`/process-tasks/${taskId}/to-surplus`, payload)).data
 }
 
 export async function updateCompleted(
@@ -178,4 +234,60 @@ export async function transferTask(
   },
 ) {
   return (await http.post(`/process-tasks/${taskId}/transfer`, payload)).data
+}
+
+export interface SurplusItem {
+  id: number
+  taskId: number
+  orderId: number
+  orderNo: string
+  model: string
+  customer: string
+  batchNo: string
+  transferredQuantity: number
+  currentQuantity: number
+  scrappedQuantity: number
+  remark: string | null
+  transferredAt: string
+  operator: { id: number; name: string }
+}
+
+export async function getSurplus(params?: Record<string, string | number>) {
+  return (
+    await http.get<{
+      items: SurplusItem[]
+      total: number
+      page: number
+      pageSize: number
+      summaryQuantity: number
+    }>('/surplus', { params })
+  ).data
+}
+
+export interface MachineItem extends WorkstationItem {
+  enabled: boolean
+  sort: number
+}
+
+export async function getMachines() {
+  return (await http.get<MachineItem[]>('/machines')).data
+}
+
+export async function createMachine(payload: {
+  code: string
+  name: string
+  processId: number
+}) {
+  return (await http.post<MachineItem>('/machines', payload)).data
+}
+
+export async function updateMachine(
+  id: number,
+  payload: {
+    name?: string
+    enabled?: boolean
+    sort?: number
+  },
+) {
+  return (await http.patch<MachineItem>(`/machines/${id}`, payload)).data
 }

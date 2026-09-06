@@ -12,7 +12,13 @@ export class ProcessesController {
     return this.prisma.process.findMany({
       where: { enabled: true },
       orderBy: { sort: 'asc' },
-      select: { id: true, code: true, name: true, sort: true },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        sort: true,
+        executionMode: true,
+      },
     })
   }
 }

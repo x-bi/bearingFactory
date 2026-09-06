@@ -52,7 +52,18 @@ function logout() {
         to="/orders"
         >生产单</RouterLink
       >
-      <span class="nav-item is-disabled">我的</span>
+      <RouterLink
+        class="nav-item"
+        :class="{ 'is-active': route.path.startsWith('/surplus') }"
+        to="/surplus"
+        >余品</RouterLink
+      >
+      <RouterLink
+        class="nav-item"
+        :class="{ 'is-active': route.path.startsWith('/machines') }"
+        to="/machines"
+        >机器</RouterLink
+      >
     </nav>
   </div>
 </template>
@@ -167,7 +178,7 @@ function logout() {
   bottom: 0;
   left: 0;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   min-height: 62px;
   padding-bottom: var(--safe-bottom);
   border-top: 1px solid var(--color-border);

@@ -1,7 +1,7 @@
 import { Type } from 'class-transformer'
 import { IsInt, IsNotEmpty, IsString, MaxLength, Min } from 'class-validator'
 
-export class AssignTaskDto {
+export class ReassignTaskDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(128)
@@ -9,7 +9,7 @@ export class AssignTaskDto {
 
   @Type(() => Number)
   @IsInt()
-  workstationId!: number
+  targetWorkstationId!: number
 
   @Type(() => Number)
   @IsInt()

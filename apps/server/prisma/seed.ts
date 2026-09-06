@@ -11,13 +11,13 @@ function hashPassword(password: string) {
 }
 
 const processes = [
-  ['CASTING', '浇铸', 10],
-  ['ROUGH_TURNING', '粗车', 20],
-  ['FINISH_TURNING', '精车', 30],
-  ['BORING', '镗孔', 40],
-  ['DEBURRING', '去毛刺', 50],
-  ['PACKAGING', '包装', 60],
-  ['SHIPPING', '发货', 70],
+  ['CASTING', '浇铸', 10, 'AREA'],
+  ['ROUGH_TURNING', '粗车', 20, 'MACHINE'],
+  ['FINISH_TURNING', '精车', 30, 'MACHINE'],
+  ['BORING', '镗加工', 40, 'MACHINE'],
+  ['DEBURRING', '去毛刺', 50, 'AREA'],
+  ['PACKAGING', '包装', 60, 'AREA'],
+  ['SHIPPING', '发货', 70, 'AREA'],
 ] as const
 
 export async function seedDatabase() {
@@ -32,11 +32,11 @@ export async function seedDatabase() {
     },
   })
 
-  for (const [code, name, sort] of processes) {
+  for (const [code, name, sort, executionMode] of processes) {
     await prisma.process.upsert({
       where: { code },
-      update: { name, sort, enabled: true },
-      create: { code, name, sort },
+      update: { name, sort, executionMode, enabled: true },
+      create: { code, name, sort, executionMode },
     })
   }
 
@@ -65,10 +65,13 @@ export async function seedDatabase() {
     ['FINISH_02', '精车2', 'DEVICE', 'FINISH_TURNING', 13, 28, 10, 12],
     ['BORING_01', '镗床1', 'DEVICE', 'BORING', 13, 48, 10, 12],
     ['BORING_BUFFER', '待镗区', 'BUFFER', 'BORING', 35, 48, 22, 16],
+    ['DEBURRING_BUFFER', '待去毛刺区', 'BUFFER', 'DEBURRING', 8, 58, 24, 10],
     ['DEBURRING_AREA', '去毛刺区', 'AREA', 'DEBURRING', 8, 70, 24, 22],
+    ['PACKAGING_BUFFER', '待包装区', 'BUFFER', 'PACKAGING', 38, 58, 24, 10],
     ['PACKAGING_AREA', '包装区', 'AREA', 'PACKAGING', 38, 70, 24, 22],
     ['SHIPPING_AREA', '发货区', 'AREA', 'SHIPPING', 68, 48, 24, 16],
     ['SHIPPING_BUFFER', '待发货区', 'BUFFER', 'SHIPPING', 68, 70, 24, 22],
+    ['SURPLUS_AREA', '余品区', 'AREA', 'SHIPPING', 68, 28, 24, 16],
   ] as const
 
   for (const [code, name, type, processCode, x, y, width, height] of stations) {
@@ -90,6 +93,15 @@ export async function seedDatabase() {
       },
     })
   }
+
+  await prisma.workstation.update({
+    where: { code: 'SHIPPING_AREA' },
+    data: { terminalKind: 'SHIPPED' },
+  })
+  await prisma.workstation.update({
+    where: { code: 'SURPLUS_AREA' },
+    data: { terminalKind: 'SURPLUS' },
+  })
 
   console.info(`Seed complete. Admin user: ${admin.username}`)
 }

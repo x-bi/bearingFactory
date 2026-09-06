@@ -11,20 +11,36 @@ export class FlowStateService {
   async recalculate(client: DbClient, batchId: number) {
     const batch = await client.batch.findUniqueOrThrow({
       where: { id: batchId },
-      include: { tasks: { include: { process: true } } },
+      include: {
+        tasks: {
+          include: {
+            process: true,
+            workstation: true,
+          },
+        },
+      },
     })
 
     const shippingTasks = batch.tasks.filter(
       (task) =>
-        task.process.code === 'SHIPPING' && task.status === 'COMPLETED',
+        task.process.code === 'SHIPPING' &&
+        task.workstation?.terminalKind === 'SHIPPED' &&
+        task.status === 'COMPLETED',
     )
     const shipped = shippingTasks.reduce(
       (sum, task) => sum + task.completedQuantity,
       0,
     )
+    const surplus = batch.tasks
+      .filter((task) => task.workstation?.terminalKind === 'SURPLUS')
+      .reduce((sum, task) => sum + task.completedQuantity, 0)
+    const scrapped = batch.tasks.reduce(
+      (sum, task) => sum + task.scrappedQuantity,
+      0,
+    )
     const taskStatuses = new Set(batch.tasks.map((task) => task.status))
     const status =
-      shipped >= batch.quantity && shippingTasks.length > 0
+      shipped + surplus + scrapped >= batch.quantity
         ? 'COMPLETED'
         : taskStatuses.has('PAUSED')
           ? 'PAUSED'
@@ -76,11 +92,24 @@ export class FlowStateService {
     })
     if (!previous) return 'PROCESSING'
 
-    const completed = await this.prisma.processTask.aggregate({
-      where: { batchId: task.batchId, processId: previous.id },
-      _sum: { completedQuantity: true },
-    })
-    return (completed._sum.completedQuantity ?? 0) < batch.quantity
+    const [completed, scrappedThroughPrevious] = await Promise.all([
+      this.prisma.processTask.aggregate({
+        where: { batchId: task.batchId, processId: previous.id },
+        _sum: { completedQuantity: true },
+      }),
+      this.prisma.processTask.aggregate({
+        where: {
+          batchId: task.batchId,
+          process: {
+            sort: { gte: batch.startProcess.sort, lte: previous.sort },
+          },
+        },
+        _sum: { scrappedQuantity: true },
+      }),
+    ])
+    return (completed._sum.completedQuantity ?? 0) +
+      (scrappedThroughPrevious._sum.scrappedQuantity ?? 0) <
+      batch.quantity
       ? 'CROSS_PROCESSING'
       : 'PROCESSING'
   }
