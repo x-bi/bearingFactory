@@ -92,14 +92,18 @@ export class WorkstationsService {
     if (!station) throw new NotFoundException('工作位置不存在')
 
     const tasks = await Promise.all(
-      station.tasks.map(async (task) => ({
-        ...task,
-        transferredQuantity: task.outgoingTransfers.reduce(
+      station.tasks.map(async (task) => {
+        const transferredQuantity = task.outgoingTransfers.reduce(
           (sum, transfer) => sum + transfer.quantity,
           0,
-        ),
-        displayStatus: await this.flowState.getDisplayStatus(task),
-      })),
+        )
+        return {
+          ...task,
+          transferredQuantity,
+          availableToTransfer: task.completedQuantity - transferredQuantity,
+          displayStatus: await this.flowState.getDisplayStatus(task),
+        }
+      }),
     )
     const activeTask =
       tasks.find((task) => ['PROCESSING', 'PAUSED'].includes(task.status)) ??

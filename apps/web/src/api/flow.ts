@@ -38,6 +38,7 @@ export interface WorkstationDetail extends WorkstationItem {
     plannedQuantity: number
     completedQuantity: number
     transferredQuantity: number
+    availableToTransfer: number
     displayStatus: string
     process: ProcessItem
     batch: {

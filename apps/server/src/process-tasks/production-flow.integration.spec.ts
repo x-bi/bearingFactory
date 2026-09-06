@@ -120,8 +120,14 @@ describe('production flow integration', () => {
     expect(await flowState.getDisplayStatus(startedFinishTask)).toBe(
       'CROSS_PROCESSING',
     )
+    await tasks.updateCompleted(
+      finishTask.id,
+      { completedQuantity: 300 },
+      adminId,
+    )
     const finishStation = await workstations.detail(finishStationId)
     expect(finishStation.displayStatus).toBe('CROSS_PROCESSING')
+    expect(finishStation.tasks[0].availableToTransfer).toBe(300)
 
     await expect(
       tasks.transfer(

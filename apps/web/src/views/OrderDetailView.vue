@@ -17,6 +17,7 @@ import {
 } from '@/api/flow'
 import { getApiErrorMessage } from '@/utils/api-error'
 import { createRequestId } from '@/utils/request-id'
+import { refreshPreservingScroll } from '@/utils/refresh-preserving-scroll'
 
 const route = useRoute()
 const order = ref<ProductionOrderItem>()
@@ -62,8 +63,8 @@ function isShippingTask(task: ProcessTaskItem) {
   return task.process.code === 'SHIPPING'
 }
 
-async function load() {
-  loading.value = true
+async function load(showLoading = true) {
+  if (showLoading) loading.value = true
   errorMessage.value = ''
   try {
     const id = Number(route.params.id)
@@ -83,7 +84,7 @@ async function load() {
   } catch (error) {
     errorMessage.value = getApiErrorMessage(error, '生产单详情加载失败')
   } finally {
-    loading.value = false
+    if (showLoading) loading.value = false
   }
 }
 
@@ -95,7 +96,7 @@ async function run(message: string, action: () => Promise<unknown>) {
   try {
     await action()
     notice.value = message
-    await load()
+    await refreshPreservingScroll(() => load(false))
   } catch (error) {
     errorMessage.value = getApiErrorMessage(error)
   } finally {
