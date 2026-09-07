@@ -20,7 +20,8 @@ bash /www/wwwroot/bearingFactory/scripts/deploy-bearing-factory.sh
 
 脚本默认在构建新镜像时保持现有 `server` 和 `nginx` 容器运行，镜像构建完成后再按
 `server -> 健康检查 -> nginx` 的顺序逐个重建容器。若构建内存余量不足，脚本会在不停止
-现有容器的情况下退出。
+现有容器的情况下退出。默认要求可用内存与空闲 Swap 合计至少 `2400MB`，可通过
+`MIN_BUILD_HEADROOM_MB` 覆盖。
 
 只有在已经安排维护窗口、并且确实需要释放容器占用的内存时，才使用停服构建模式：
 
