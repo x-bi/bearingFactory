@@ -22,6 +22,7 @@ RUNTIME_SERVICES=(
 )
 
 LOW_MEMORY_MODE="${LOW_MEMORY_MODE:-1}"
+STOP_CONTAINERS_BEFORE_BUILD="${STOP_CONTAINERS_BEFORE_BUILD:-0}"
 MIN_SWAP_MB="${MIN_SWAP_MB:-2048}"
 MIN_BUILD_HEADROOM_MB="${MIN_BUILD_HEADROOM_MB:-2800}"
 STARTUP_SETTLE_SECONDS="${STARTUP_SETTLE_SECONDS:-8}"
@@ -158,6 +159,7 @@ echo "Docker version: $(docker --version)"
 echo "Compose version: $(docker compose version)"
 echo "Compose parallel limit: $COMPOSE_PARALLEL_LIMIT"
 echo "Low memory mode: $LOW_MEMORY_MODE"
+echo "Stop containers before build: $STOP_CONTAINERS_BEFORE_BUILD"
 
 echo
 echo "Current memory status:"
@@ -254,6 +256,12 @@ if [ "$LOW_MEMORY_MODE" != "0" ] && [ "$LOW_MEMORY_MODE" != "1" ]; then
   exit 1
 fi
 
+if [ "$STOP_CONTAINERS_BEFORE_BUILD" != "0" ] &&
+   [ "$STOP_CONTAINERS_BEFORE_BUILD" != "1" ]; then
+  echo "STOP_CONTAINERS_BEFORE_BUILD must be 0 or 1."
+  exit 1
+fi
+
 for numeric_setting in \
   MIN_SWAP_MB \
   MIN_BUILD_HEADROOM_MB \
@@ -280,22 +288,27 @@ if [ "$LOW_MEMORY_MODE" -eq 1 ]; then
     exit 1
   fi
 
-  mapfile -t RUNNING_BEFORE_STOP < <(docker compose ps --status running --services)
+  if [ "$STOP_CONTAINERS_BEFORE_BUILD" -eq 1 ]; then
+    mapfile -t RUNNING_BEFORE_STOP < <(docker compose ps --status running --services)
 
-  if [ "${#RUNNING_BEFORE_STOP[@]}" -gt 0 ]; then
-    echo
-    echo "Stopping running containers one by one before building..."
-    CAN_RESTORE_STOPPED_CONTAINERS=1
+    if [ "${#RUNNING_BEFORE_STOP[@]}" -gt 0 ]; then
+      echo
+      echo "Stopping running containers one by one before building..."
+      CAN_RESTORE_STOPPED_CONTAINERS=1
 
-    # Stop the public proxy first, then the application server.
-    for service in "nginx" "server"; do
-      if printf '%s\n' "${RUNNING_BEFORE_STOP[@]}" | grep -Fxq "$service"; then
-        echo "Stopping service: $service"
-        docker compose stop --timeout 30 "$service"
-      fi
-    done
+      # Stop the public proxy first, then the application server.
+      for service in "nginx" "server"; do
+        if printf '%s\n' "${RUNNING_BEFORE_STOP[@]}" | grep -Fxq "$service"; then
+          echo "Stopping service: $service"
+          docker compose stop --timeout 30 "$service"
+        fi
+      done
+    else
+      echo "No running Bearing Factory containers need to be stopped."
+    fi
   else
-    echo "No running Bearing Factory containers need to be stopped."
+    echo
+    echo "Keeping current containers running while new images are built."
   fi
 
   AVAILABLE_RAM_MB="$(meminfo_mb MemAvailable)"
@@ -303,13 +316,19 @@ if [ "$LOW_MEMORY_MODE" -eq 1 ]; then
   BUILD_HEADROOM_MB="$((AVAILABLE_RAM_MB + FREE_SWAP_MB))"
 
   echo
-  echo "Memory after stopping containers:"
+  echo "Memory available for Docker builds:"
   free -h || true
   echo "Build headroom: ${BUILD_HEADROOM_MB}MB (RAM available + swap free)"
 
   if [ "$BUILD_HEADROOM_MB" -lt "$MIN_BUILD_HEADROOM_MB" ]; then
     echo "Insufficient memory headroom for a safe Docker build."
+    if [ "$STOP_CONTAINERS_BEFORE_BUILD" -eq 1 ]; then
+      echo "Previously running containers will now be restarted."
+    else
+      echo "Existing containers were left unchanged."
+    fi
     echo "Required: ${MIN_BUILD_HEADROOM_MB}MB; current: ${BUILD_HEADROOM_MB}MB."
+    echo "Increase swap or explicitly set STOP_CONTAINERS_BEFORE_BUILD=1 to use the maintenance-window mode."
     false
   fi
 fi

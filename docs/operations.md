@@ -10,6 +10,24 @@
 
 生产数据库位于宿主机 `data/production.db`。不要将 `data/` 放在临时目录。
 
+## 自动部署
+
+宝塔计划任务执行：
+
+```bash
+bash /www/wwwroot/bearingFactory/scripts/deploy-bearing-factory.sh
+```
+
+脚本默认在构建新镜像时保持现有 `server` 和 `nginx` 容器运行，镜像构建完成后再按
+`server -> 健康检查 -> nginx` 的顺序逐个重建容器。若构建内存余量不足，脚本会在不停止
+现有容器的情况下退出。
+
+只有在已经安排维护窗口、并且确实需要释放容器占用的内存时，才使用停服构建模式：
+
+```bash
+STOP_CONTAINERS_BEFORE_BUILD=1 bash /www/wwwroot/bearingFactory/scripts/deploy-bearing-factory.sh force
+```
+
 ## SQLite 备份
 
 备份使用 SQLite Online Backup API，可以在服务运行期间生成一致性快照。
