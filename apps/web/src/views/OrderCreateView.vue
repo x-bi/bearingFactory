@@ -74,8 +74,8 @@ async function submit() {
 watch(() => form.startProcessId, loadWorkstations)
 onMounted(async () => {
   processes.value = await getProcesses()
-  const rough = processes.value.find((item) => item.code === 'ROUGH_TURNING')
-  form.startProcessId = rough?.id ?? processes.value[0]?.id ?? 0
+  const casting = processes.value.find((item) => item.code === 'CASTING')
+  form.startProcessId = casting?.id ?? processes.value[0]?.id ?? 0
   form.batchNo = `B${new Date().toISOString().slice(2, 10).replaceAll('-', '')}-01`
 })
 </script>
