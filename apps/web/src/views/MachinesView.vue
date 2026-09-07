@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import AppShell from '@/components/AppShell.vue'
 import {
   createMachine,
+  deleteMachine,
   getMachines,
   getProcesses,
   updateMachine,
@@ -17,6 +18,7 @@ const loading = ref(true)
 const saving = ref(false)
 const errorMessage = ref('')
 const notice = ref('')
+const editingId = ref(0)
 const form = reactive({ code: '', name: '', processId: 0 })
 const machineProcesses = computed(() =>
   processes.value.filter((item) => item.executionMode === 'MACHINE'),
@@ -29,12 +31,30 @@ async function load() {
       getMachines(),
       getProcesses(),
     ])
-    if (!form.processId) form.processId = machineProcesses.value[0]?.id ?? 0
+    if (!editingId.value && !form.processId)
+      form.processId = machineProcesses.value[0]?.id ?? 0
   } catch (error) {
     errorMessage.value = getApiErrorMessage(error, '机器列表加载失败')
   } finally {
     loading.value = false
   }
+}
+
+function resetForm() {
+  editingId.value = 0
+  form.code = ''
+  form.name = ''
+  form.processId = machineProcesses.value[0]?.id ?? 0
+}
+
+function startEdit(machine: MachineItem) {
+  editingId.value = machine.id
+  form.code = machine.code
+  form.name = machine.name
+  form.processId = machine.processId ?? 0
+  errorMessage.value = ''
+  notice.value = ''
+  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
 async function submit() {
@@ -43,10 +63,33 @@ async function submit() {
   errorMessage.value = ''
   notice.value = ''
   try {
-    await createMachine({ ...form })
-    form.code = ''
-    form.name = ''
-    notice.value = '机器已增加'
+    if (editingId.value) {
+      await updateMachine(editingId.value, { ...form })
+      notice.value = '机器信息已更新'
+    } else {
+      await createMachine({ ...form })
+      notice.value = '机器已增加'
+    }
+    resetForm()
+    await load()
+  } catch (error) {
+    errorMessage.value = getApiErrorMessage(error)
+  } finally {
+    saving.value = false
+  }
+}
+
+async function removeMachine(machine: MachineItem) {
+  if (saving.value) return
+  if (!window.confirm(`确定删除机器“${machine.name}”吗？此操作不可撤销。`))
+    return
+  saving.value = true
+  errorMessage.value = ''
+  notice.value = ''
+  try {
+    await deleteMachine(machine.id)
+    if (editingId.value === machine.id) resetForm()
+    notice.value = '机器已删除'
     await load()
   } catch (error) {
     errorMessage.value = getApiErrorMessage(error)
@@ -77,7 +120,7 @@ onMounted(load)
   <AppShell title="机器管理">
     <section class="create-card">
       <p>MACHINE REGISTER</p>
-      <h2>增加机器</h2>
+      <h2>{{ editingId ? '编辑机器' : '增加机器' }}</h2>
       <form @submit.prevent="submit">
         <label
           ><span>机器类型</span
@@ -110,9 +153,20 @@ onMounted(load)
         <p class="layout-hint">
           位置由系统按照工序顺序自动排列，无需填写坐标。
         </p>
-        <button type="submit" :disabled="saving || !form.processId">
-          {{ saving ? '保存中…' : '增加机器' }}
-        </button>
+        <div class="form-actions">
+          <button type="submit" :disabled="saving || !form.processId">
+            {{ saving ? '保存中…' : editingId ? '保存修改' : '增加机器' }}
+          </button>
+          <button
+            v-if="editingId"
+            type="button"
+            class="cancel-button"
+            :disabled="saving"
+            @click="resetForm"
+          >
+            取消编辑
+          </button>
+        </div>
       </form>
     </section>
     <p v-if="notice" class="message success">{{ notice }}</p>
@@ -133,9 +187,22 @@ onMounted(load)
           <h3>{{ machine.name }}</h3>
           <p>工序内顺序 {{ machine.sort }}</p>
         </div>
-        <button type="button" :disabled="saving" @click="toggle(machine)">
-          {{ machine.enabled ? '停用' : '启用' }}
-        </button>
+        <div class="machine-actions">
+          <button type="button" :disabled="saving" @click="startEdit(machine)">
+            编辑
+          </button>
+          <button type="button" :disabled="saving" @click="toggle(machine)">
+            {{ machine.enabled ? '停用' : '启用' }}
+          </button>
+          <button
+            type="button"
+            class="delete-button"
+            :disabled="saving"
+            @click="removeMachine(machine)"
+          >
+            删除
+          </button>
+        </div>
       </article>
     </section>
   </AppShell>
@@ -197,13 +264,23 @@ select {
   font-size: 11px;
   line-height: 1.6;
 }
-.create-card button {
+.form-actions {
+  display: flex;
+  gap: 8px;
+}
+.create-card .form-actions button {
+  flex: 1;
   min-height: 46px;
   border: 0;
   border-radius: 4px;
   background: var(--color-brand);
   color: white;
   font-weight: 800;
+}
+.create-card .form-actions .cancel-button {
+  border: 1px solid var(--color-border-strong);
+  background: white;
+  color: var(--color-text-secondary);
 }
 .machine-list {
   margin-top: 12px;
@@ -248,13 +325,21 @@ article h3 {
   font-size: 16px;
 }
 article button {
-  align-self: center;
   min-width: 64px;
   min-height: 36px;
   border: 1px solid var(--color-border-strong);
   border-radius: 4px;
   background: white;
   font-weight: 800;
+}
+.machine-actions {
+  display: flex;
+  align-self: center;
+  gap: 6px;
+}
+.machine-actions .delete-button {
+  border-color: color-mix(in srgb, var(--color-danger), transparent 60%);
+  color: var(--color-danger);
 }
 .message {
   padding: 12px;
@@ -268,5 +353,17 @@ article button {
 }
 button:disabled {
   opacity: 0.55;
+}
+@media (max-width: 520px) {
+  article {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .machine-actions {
+    align-self: stretch;
+  }
+  .machine-actions button {
+    flex: 1;
+  }
 }
 </style>

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -37,5 +38,13 @@ export class MachinesController {
     @Req() request: AuthenticatedRequest,
   ) {
     return this.service.update(id, dto, request.user.id)
+  }
+
+  @Delete(':id')
+  remove(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.service.remove(id, request.user.id)
   }
 }

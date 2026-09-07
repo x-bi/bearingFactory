@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
+#!/usr/bin/env bash  
+# 执行命令   bash scripts/clear-production-data.sh --confirm-clear-business-data
 set -Eeuo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-/www/wwwroot/bearingFactory}"

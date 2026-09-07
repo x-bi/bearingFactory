@@ -15,7 +15,7 @@ export class MachinesService {
 
   list() {
     return this.prisma.workstation.findMany({
-      where: { type: 'DEVICE' },
+      where: { type: 'DEVICE', terminalKind: null },
       orderBy: [{ process: { sort: 'asc' } }, { sort: 'asc' }, { id: 'asc' }],
       include: { process: true },
     })
@@ -35,7 +35,11 @@ export class MachinesService {
         })
         if (!layout) throw new BadRequestException('尚未配置车间布局')
         const lastMachine = await tx.workstation.findFirst({
-          where: { processId: process.id, type: 'DEVICE' },
+          where: {
+            processId: process.id,
+            type: 'DEVICE',
+            terminalKind: null,
+          },
           orderBy: [{ sort: 'desc' }, { id: 'desc' }],
         })
         const machine = await tx.workstation.create({
@@ -75,37 +79,126 @@ export class MachinesService {
   }
 
   async update(id: number, dto: UpdateMachineDto, userId: number) {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const machine = await tx.workstation.findFirst({
+          where: { id, type: 'DEVICE', terminalKind: null },
+        })
+        if (!machine) throw new NotFoundException('机器不存在')
+        if (dto.enabled === false) {
+          const active = await tx.processTask.findFirst({
+            where: { workstationId: id, status: 'PROCESSING' },
+          })
+          if (active)
+            throw new ConflictException('机器仍有加工中的生产单，不能停用')
+        }
+
+        let nextSort: number | undefined
+        if (
+          dto.processId !== undefined &&
+          dto.processId !== machine.processId
+        ) {
+          const history = await tx.processTask.findFirst({
+            where: { workstationId: id },
+            select: { id: true },
+          })
+          if (history)
+            throw new ConflictException('已有生产记录的机器不能修改所属工序')
+
+          const process = await tx.process.findFirst({
+            where: {
+              id: dto.processId,
+              enabled: true,
+              executionMode: 'MACHINE',
+            },
+          })
+          if (!process)
+            throw new BadRequestException('只能选择粗车、精车或镗加工工序')
+          const lastMachine = await tx.workstation.findFirst({
+            where: {
+              processId: process.id,
+              type: 'DEVICE',
+              terminalKind: null,
+              id: { not: id },
+            },
+            orderBy: [{ sort: 'desc' }, { id: 'desc' }],
+          })
+          nextSort = (lastMachine?.sort ?? 0) + 10
+        }
+
+        const updated = await tx.workstation.update({
+          where: { id },
+          data: {
+            ...(dto.code !== undefined
+              ? { code: dto.code.trim().toUpperCase() }
+              : {}),
+            ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+            ...(dto.processId !== undefined
+              ? { processId: dto.processId }
+              : {}),
+            ...(dto.enabled !== undefined ? { enabled: dto.enabled } : {}),
+            ...(dto.sort !== undefined
+              ? { sort: dto.sort }
+              : nextSort !== undefined
+                ? { sort: nextSort }
+                : {}),
+          },
+          include: { process: true },
+        })
+        await tx.operationLog.create({
+          data: {
+            userId,
+            action: 'UPDATE_MACHINE',
+            entityType: 'Workstation',
+            entityId: id,
+            payload: JSON.stringify(dto),
+          },
+        })
+        return updated
+      })
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException('机器编码已存在')
+      }
+      throw error
+    }
+  }
+
+  async remove(id: number, userId: number) {
     return this.prisma.$transaction(async (tx) => {
       const machine = await tx.workstation.findFirst({
-        where: { id, type: 'DEVICE' },
+        where: { id, type: 'DEVICE', terminalKind: null },
       })
       if (!machine) throw new NotFoundException('机器不存在')
-      if (dto.enabled === false) {
-        const active = await tx.processTask.findFirst({
-          where: { workstationId: id, status: 'PROCESSING' },
-        })
-        if (active)
-          throw new ConflictException('机器仍有加工中的生产单，不能停用')
-      }
-      const updated = await tx.workstation.update({
+
+      const history = await tx.processTask.findFirst({
+        where: { workstationId: id },
+        select: { id: true },
+      })
+      if (history)
+        throw new ConflictException('机器已有生产记录，不能删除，请停用机器')
+
+      await tx.workstation.update({
         where: { id },
-        data: {
-          ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
-          ...(dto.enabled !== undefined ? { enabled: dto.enabled } : {}),
-          ...(dto.sort !== undefined ? { sort: dto.sort } : {}),
-        },
-        include: { process: true },
+        data: { enabled: false, terminalKind: 'DELETED' },
       })
       await tx.operationLog.create({
         data: {
           userId,
-          action: 'UPDATE_MACHINE',
+          action: 'DELETE_MACHINE',
           entityType: 'Workstation',
           entityId: id,
-          payload: JSON.stringify(dto),
+          payload: JSON.stringify({
+            code: machine.code,
+            name: machine.name,
+            processId: machine.processId,
+          }),
         },
       })
-      return updated
+      return { id, deleted: true }
     })
   }
 }

@@ -284,10 +284,17 @@ export async function createMachine(payload: {
 export async function updateMachine(
   id: number,
   payload: {
+    code?: string
     name?: string
+    processId?: number
     enabled?: boolean
     sort?: number
   },
 ) {
   return (await http.patch<MachineItem>(`/machines/${id}`, payload)).data
+}
+
+export async function deleteMachine(id: number) {
+  return (await http.delete<{ id: number; deleted: true }>(`/machines/${id}`))
+    .data
 }

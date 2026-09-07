@@ -2,6 +2,7 @@ import { Type } from 'class-transformer'
 import {
   IsBoolean,
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
@@ -10,8 +11,20 @@ import {
 export class UpdateMachineDto {
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(50)
+  code?: string
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
   @MaxLength(100)
   name?: string
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  processId?: number
 
   @IsOptional()
   @Type(() => Boolean)

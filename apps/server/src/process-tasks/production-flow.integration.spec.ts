@@ -623,7 +623,7 @@ describe('production flow integration', () => {
     ])
   })
 
-  it('creates machines without manual layout coordinates', async () => {
+  it('creates, edits and safely deletes machines', async () => {
     const first = await machines.create(
       {
         code: 'AUTO_MACHINE_01',
@@ -644,5 +644,49 @@ describe('production flow integration', () => {
     expect(first.x).toBe(0)
     expect(first.y).toBe(0)
     expect(second.sort).toBeGreaterThan(first.sort)
+
+    const updated = await machines.update(
+      second.id,
+      {
+        code: 'AUTO_MACHINE_02_EDITED',
+        name: '自动排布粗车4（已编辑）',
+        processId: roughProcessId,
+      },
+      adminId,
+    )
+    expect(updated.code).toBe('AUTO_MACHINE_02_EDITED')
+    expect(updated.name).toBe('自动排布粗车4（已编辑）')
+
+    await machines.remove(first.id, adminId)
+    expect((await machines.list()).some((item) => item.id === first.id)).toBe(
+      false,
+    )
+    expect(
+      await prisma.workstation.findUniqueOrThrow({ where: { id: first.id } }),
+    ).toMatchObject({ enabled: false, terminalKind: 'DELETED' })
+
+    const order = await orders.create(
+      {
+        model: 'DELETE-GUARD',
+        customer: '机器删除保护测试',
+        quantity: 10,
+        batchNo: 'AUTO-MACHINE-DELETE-GUARD',
+        startProcessId: roughProcessId,
+        startWorkstationId: roughBufferId,
+      },
+      adminId,
+    )
+    await tasks.assign(
+      order.batches[0].tasks[0].id,
+      {
+        requestId: 'auto-machine-delete-guard',
+        workstationId: second.id,
+        quantity: 10,
+      },
+      adminId,
+    )
+    await expect(machines.remove(second.id, adminId)).rejects.toThrow(
+      ConflictException,
+    )
   })
 })
