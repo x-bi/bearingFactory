@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   centeredScrollOffset,
   clampZoom,
+  exceedsDragThreshold,
   parseStoredCanvasPosition,
   parseStoredZoom,
 } from './canvas-zoom'
@@ -35,5 +36,10 @@ describe('canvas zoom', () => {
     expect(parseStoredCanvasPosition('{"left":-1,"top":20}')).toBeNull()
     expect(parseStoredCanvasPosition('{"left":20}')).toBeNull()
     expect(parseStoredCanvasPosition('invalid')).toBeNull()
+  })
+
+  it('starts dragging only after pointer movement passes the threshold', () => {
+    expect(exceedsDragThreshold(100, 80, 103, 82)).toBe(false)
+    expect(exceedsDragThreshold(100, 80, 104, 82)).toBe(true)
   })
 })

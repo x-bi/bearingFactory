@@ -41,3 +41,15 @@ export function centeredScrollOffset(
   const logicalCenter = (scrollOffset + viewportSize / 2) / previousZoom
   return Math.max(0, logicalCenter * nextZoom - viewportSize / 2)
 }
+
+export function exceedsDragThreshold(
+  startX: number,
+  startY: number,
+  currentX: number,
+  currentY: number,
+  threshold = 5,
+) {
+  return (
+    Math.abs(currentX - startX) + Math.abs(currentY - startY) > threshold
+  )
+}

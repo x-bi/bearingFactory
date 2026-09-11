@@ -6,6 +6,7 @@ import { getApiErrorMessage } from '@/utils/api-error'
 import {
   centeredScrollOffset,
   clampZoom,
+  exceedsDragThreshold,
   parseStoredCanvasPosition,
   parseStoredZoom,
 } from '@/utils/canvas-zoom'
@@ -312,23 +313,35 @@ function startPan(event: PointerEvent) {
   if (event.pointerType === 'mouse' && event.button !== 0) return
   const container = viewport.value
   if (!container) return
-  dragging.value = true
+  dragging.value = false
   dragPointerId = event.pointerId
   dragStartX = event.clientX
   dragStartY = event.clientY
   dragScrollLeft = container.scrollLeft
   dragScrollTop = container.scrollTop
-  container.setPointerCapture(event.pointerId)
 }
 
 function movePan(event: PointerEvent) {
   const container = viewport.value
-  if (!container || !dragging.value || event.pointerId !== dragPointerId) return
+  if (!container || event.pointerId !== dragPointerId) return
   const offsetX = event.clientX - dragStartX
   const offsetY = event.clientY - dragStartY
-  if (Math.abs(offsetX) + Math.abs(offsetY) > 5) {
-    suppressClickUntil = Date.now() + 250
+
+  if (!dragging.value) {
+    if (
+      !exceedsDragThreshold(
+        dragStartX,
+        dragStartY,
+        event.clientX,
+        event.clientY,
+      )
+    ) {
+      return
+    }
+    dragging.value = true
+    container.setPointerCapture(event.pointerId)
   }
+
   container.scrollLeft = dragScrollLeft - offsetX
   container.scrollTop = dragScrollTop - offsetY
   event.preventDefault()
@@ -337,12 +350,16 @@ function movePan(event: PointerEvent) {
 function endPan(event: PointerEvent) {
   const container = viewport.value
   if (event.pointerId !== dragPointerId) return
+  const didDrag = dragging.value
   dragging.value = false
   dragPointerId = undefined
   if (container?.hasPointerCapture(event.pointerId)) {
     container.releasePointerCapture(event.pointerId)
   }
-  persistPosition()
+  if (didDrag) {
+    suppressClickUntil = Date.now() + 250
+    persistPosition()
+  }
 }
 
 function guardCanvasClick(event: MouseEvent) {
