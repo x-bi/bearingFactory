@@ -69,6 +69,7 @@ export class ProductionOrdersService {
         include: {
           batches: {
             where: { deletedAt: null },
+            orderBy: { id: 'asc' },
             include: {
               tasks: {
                 where: { deletedAt: null },
@@ -96,33 +97,93 @@ export class ProductionOrdersService {
 
   async create(dto: CreateProductionOrderDto, userId: number) {
     return this.prisma.$transaction(async (tx) => {
-      const process = await tx.process.findFirst({
-        where: { id: dto.startProcessId, enabled: true },
-      })
-      if (!process) throw new BadRequestException('起始工序无效')
+      const initialTasks =
+        dto.initialTasks ??
+        (dto.startProcessId
+          ? [
+              {
+                quantity: dto.quantity,
+                startProcessId: dto.startProcessId,
+                startWorkstationId: dto.startWorkstationId,
+              },
+            ]
+          : [])
+      if (!dto.batchNo.trim()) throw new BadRequestException('批次号不能为空')
+      if (!initialTasks.length)
+        throw new BadRequestException('至少需要一份起始任务')
+      if (
+        initialTasks.some(
+          (item) => !Number.isInteger(item.quantity) || item.quantity < 1,
+        ) ||
+        initialTasks.reduce((sum, item) => sum + item.quantity, 0) !==
+          dto.quantity
+      ) {
+        throw new BadRequestException('各份起始数量之和必须等于生产单总数量')
+      }
 
-      const processBuffer = await tx.workstation.findFirst({
-        where: {
-          processId: process.id,
-          enabled: true,
-          type: 'BUFFER',
-        },
-        orderBy: [{ sort: 'asc' }, { id: 'asc' }],
-      })
-      let workstation = processBuffer
-      if (dto.startWorkstationId) {
-        workstation = await tx.workstation.findFirst({
-          where: {
-            id: dto.startWorkstationId,
-            processId: process.id,
-            enabled: true,
-          },
+      const tasksByPosition = new Map<
+        string,
+        {
+          processId: number
+          workstationId: number | undefined
+          plannedQuantity: number
+          initialQuantity: number
+          status: string
+        }
+      >()
+      let earliestProcess: { id: number; sort: number } | undefined
+      for (const entry of initialTasks) {
+        const process = await tx.process.findFirst({
+          where: { id: entry.startProcessId, enabled: true },
         })
-        if (!workstation) throw new BadRequestException('起始工作位置无效')
-        if (processBuffer && workstation.type !== 'BUFFER') {
-          throw new BadRequestException('起始工序必须先进入待加工区')
+        if (!process) throw new BadRequestException('起始工序无效')
+        if (!earliestProcess || process.sort < earliestProcess.sort) {
+          earliestProcess = { id: process.id, sort: process.sort }
+        }
+        const processBuffer = await tx.workstation.findFirst({
+          where: { processId: process.id, enabled: true, type: 'BUFFER' },
+          orderBy: [{ sort: 'asc' }, { id: 'asc' }],
+        })
+        let workstation = processBuffer
+        if (entry.startWorkstationId) {
+          workstation = await tx.workstation.findFirst({
+            where: {
+              id: entry.startWorkstationId,
+              processId: process.id,
+              enabled: true,
+            },
+          })
+          if (
+            !workstation ||
+            workstation.terminalKind === 'SURPLUS' ||
+            (workstation.type !== 'BUFFER' &&
+              !(
+                (process.executionMode === 'MACHINE' &&
+                  workstation.type === 'DEVICE') ||
+                (process.executionMode === 'AREA' &&
+                  workstation.type === 'AREA')
+              ))
+          ) {
+            throw new BadRequestException('起始工作位置无效')
+          }
+        }
+        const status = workstation ? 'PENDING' : 'UNSCHEDULED'
+        const key = `${process.id}:${workstation?.id ?? 0}`
+        const existing = tasksByPosition.get(key)
+        if (existing) {
+          existing.plannedQuantity += entry.quantity
+          existing.initialQuantity += entry.quantity
+        } else {
+          tasksByPosition.set(key, {
+            processId: process.id,
+            workstationId: workstation?.id,
+            plannedQuantity: entry.quantity,
+            initialQuantity: entry.quantity,
+            status,
+          })
         }
       }
+      const tasks = [...tasksByPosition.values()]
 
       const today = new Date()
       const datePart = [
@@ -134,7 +195,9 @@ export class ProductionOrdersService {
         where: { orderNo: { startsWith: `PO${datePart}` } },
       })
       const orderNo = `PO${datePart}${String(todayCount + 1).padStart(4, '0')}`
-      const initialStatus = workstation ? 'PENDING' : 'UNSCHEDULED'
+      const initialStatus = tasks.some((item) => item.status === 'PENDING')
+        ? 'PENDING'
+        : 'UNSCHEDULED'
 
       const order = await tx.productionOrder.create({
         data: {
@@ -151,15 +214,8 @@ export class ProductionOrdersService {
               batchNo: dto.batchNo.trim(),
               quantity: dto.quantity,
               status: initialStatus,
-              startProcessId: process.id,
-              tasks: {
-                create: {
-                  processId: process.id,
-                  workstationId: workstation?.id,
-                  plannedQuantity: dto.quantity,
-                  status: initialStatus,
-                },
-              },
+              startProcessId: earliestProcess!.id,
+              tasks: { create: tasks },
             },
           },
         },
@@ -171,7 +227,15 @@ export class ProductionOrdersService {
           action: 'CREATE_ORDER',
           entityType: 'ProductionOrder',
           entityId: order.id,
-          payload: JSON.stringify({ orderNo, batchNo: dto.batchNo }),
+          payload: JSON.stringify({
+            orderNo,
+            batchNo: dto.batchNo.trim(),
+            initialTasks: initialTasks.map((item) => ({
+              quantity: item.quantity,
+              startProcessId: item.startProcessId,
+              workstationId: item.startWorkstationId,
+            })),
+          }),
         },
       })
       return order
@@ -185,6 +249,7 @@ export class ProductionOrdersService {
         createdBy: { select: { id: true, name: true, username: true } },
         batches: {
           where: { deletedAt: null },
+          orderBy: { id: 'asc' },
           include: {
             startProcess: true,
             tasks: {
@@ -290,6 +355,7 @@ export class ProductionOrdersService {
               select: {
                 status: true,
                 completedQuantity: true,
+                initialQuantity: true,
                 scrappedQuantity: true,
                 startedAt: true,
                 processId: true,
@@ -304,16 +370,27 @@ export class ProductionOrdersService {
     if (!order) throw new NotFoundException('生产单不存在')
     const tasks = order.batches.flatMap((batch) => batch.tasks)
     const otherProcessTasks = order.batches.reduce(
-      (sum, batch) => sum + batch.tasks.filter((task) => task.processId !== batch.startProcessId).length,
+      (sum, batch) =>
+        sum +
+        batch.tasks.filter((task) => task.processId !== batch.startProcessId)
+          .length,
       0,
     )
-    const progressedTasks = tasks.filter((task) =>
-      Boolean(task.startedAt) || task.completedQuantity > 0 ||
-      task.scrappedQuantity > 0 ||
-      ['PROCESSING', 'PAUSED', 'COMPLETED'].includes(task.status),
+    const progressedTasks = tasks.filter(
+      (task) =>
+        Boolean(task.startedAt) ||
+        task.completedQuantity > 0 ||
+        task.scrappedQuantity > 0 ||
+        ['PROCESSING', 'PAUSED', 'COMPLETED'].includes(task.status),
     ).length
-    const transferCount = order.batches.reduce((sum, batch) => sum + batch.transfers.length, 0)
-    const scrapCount = order.batches.reduce((sum, batch) => sum + batch.scrapRecords.length, 0)
+    const transferCount = order.batches.reduce(
+      (sum, batch) => sum + batch.transfers.length,
+      0,
+    )
+    const scrapCount = order.batches.reduce(
+      (sum, batch) => sum + batch.scrapRecords.length,
+      0,
+    )
     return {
       orderNo: order.orderNo,
       batchCount: order.batches.length,
@@ -323,9 +400,16 @@ export class ProductionOrdersService {
       transferCount,
       scrapCount,
       requiresConfirmation:
-        order.status !== 'PENDING' && order.status !== 'UNSCHEDULED' ||
-        progressedTasks > 0 || otherProcessTasks > 0 || transferCount > 0 ||
-        scrapCount > 0 || tasks.length > order.batches.length,
+        (order.status !== 'PENDING' && order.status !== 'UNSCHEDULED') ||
+        progressedTasks > 0 ||
+        otherProcessTasks > 0 ||
+        transferCount > 0 ||
+        scrapCount > 0 ||
+        tasks.length >
+          Math.max(
+            order.batches.length,
+            tasks.filter((task) => task.initialQuantity > 0).length,
+          ),
     }
   }
 
@@ -341,15 +425,32 @@ export class ProductionOrdersService {
       }
       const deletedAt = new Date()
       const batch = { orderId: id, deletedAt: null }
-      await tx.scrapRecord.updateMany({ where: { batch, deletedAt: null }, data: { deletedAt } })
-      await tx.transfer.updateMany({ where: { batch, deletedAt: null }, data: { deletedAt } })
-      await tx.processTask.updateMany({ where: { batch, deletedAt: null }, data: { deletedAt } })
-      await tx.batch.updateMany({ where: { orderId: id, deletedAt: null }, data: { deletedAt } })
+      await tx.scrapRecord.updateMany({
+        where: { batch, deletedAt: null },
+        data: { deletedAt },
+      })
+      await tx.transfer.updateMany({
+        where: { batch, deletedAt: null },
+        data: { deletedAt },
+      })
+      await tx.processTask.updateMany({
+        where: { batch, deletedAt: null },
+        data: { deletedAt },
+      })
+      await tx.batch.updateMany({
+        where: { orderId: id, deletedAt: null },
+        data: { deletedAt },
+      })
       await tx.productionOrder.update({ where: { id }, data: { deletedAt } })
-      await tx.operationLog.create({ data: {
-        userId, action: 'DELETE_ORDER', entityType: 'ProductionOrder', entityId: id,
-        payload: JSON.stringify(summary),
-      } })
+      await tx.operationLog.create({
+        data: {
+          userId,
+          action: 'DELETE_ORDER',
+          entityType: 'ProductionOrder',
+          entityId: id,
+          payload: JSON.stringify(summary),
+        },
+      })
       return { id, deleted: true }
     })
   }

@@ -92,7 +92,7 @@ export class FlowStateService {
     })
     if (!previous) return 'PROCESSING'
 
-    const [completed, scrappedThroughPrevious] = await Promise.all([
+    const [completed, scrappedThroughPrevious, initial] = await Promise.all([
       this.prisma.processTask.aggregate({
         where: { batchId: task.batchId, processId: previous.id },
         _sum: { completedQuantity: true },
@@ -106,10 +106,26 @@ export class FlowStateService {
         },
         _sum: { scrappedQuantity: true },
       }),
+      this.prisma.processTask.aggregate({
+        where: {
+          batchId: task.batchId,
+          deletedAt: null,
+          process: { sort: { lte: previous.sort } },
+        },
+        _sum: { initialQuantity: true },
+      }),
     ])
+    const initialTotal = await this.prisma.processTask.aggregate({
+      where: { batchId: task.batchId, deletedAt: null },
+      _sum: { initialQuantity: true },
+    })
+    const expectedThroughPrevious =
+      (initialTotal._sum.initialQuantity ?? 0) > 0
+        ? (initial._sum.initialQuantity ?? 0)
+        : batch.quantity
     return (completed._sum.completedQuantity ?? 0) +
       (scrappedThroughPrevious._sum.scrappedQuantity ?? 0) <
-      batch.quantity
+      expectedThroughPrevious
       ? 'CROSS_PROCESSING'
       : 'PROCESSING'
   }

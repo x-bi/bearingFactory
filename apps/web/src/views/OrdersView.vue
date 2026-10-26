@@ -17,6 +17,36 @@ const labels: Record<string, string> = {
   COMPLETED: '已完成',
 }
 
+function currentProcesses(order: ProductionOrderItem) {
+  return (
+    [
+      ...new Set(
+        order.batches.flatMap((batch) =>
+          batch.tasks
+            .filter((task) => task.status !== 'COMPLETED')
+            .map((task) => task.process.name),
+        ),
+      ),
+    ].join('、') ||
+    order.batches[0]?.tasks[0]?.process.name ||
+    '待分配'
+  )
+}
+
+function progress(order: ProductionOrderItem) {
+  const completed = order.batches.reduce((sum, batch) => {
+    const byProcess = new Map<number, number>()
+    for (const task of batch.tasks) {
+      byProcess.set(
+        task.processId,
+        (byProcess.get(task.processId) ?? 0) + task.completedQuantity,
+      )
+    }
+    return sum + Math.min(batch.quantity, Math.max(0, ...byProcess.values()))
+  }, 0)
+  return Math.min(100, (completed / Math.max(order.quantity, 1)) * 100)
+}
+
 async function load() {
   loading.value = true
   errorMessage.value = ''
@@ -103,17 +133,21 @@ onMounted(load)
           </div>
           <div>
             <dt>批次</dt>
-            <dd>{{ order.batches[0]?.batchNo ?? '--' }}</dd>
+            <dd>
+              {{
+                order.batches.map((batch) => batch.batchNo).join('、') || '--'
+              }}
+            </dd>
           </div>
           <div>
             <dt>当前工序</dt>
-            <dd>{{ order.batches[0]?.tasks[0]?.process?.name ?? '待分配' }}</dd>
+            <dd>{{ currentProcesses(order) }}</dd>
           </div>
         </dl>
         <div class="progress">
           <i
             :style="{
-              width: `${Math.min(100, ((order.batches[0]?.tasks.reduce((s, t) => s + t.completedQuantity, 0) ?? 0) / Math.max(order.quantity, 1)) * 100)}%`,
+              width: `${progress(order)}%`,
             }"
           />
         </div>

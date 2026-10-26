@@ -63,7 +63,55 @@ const scrapTaskItem = computed(() =>
 const surplusTaskItem = computed(() =>
   tasks.value.find((item) => item.id === surplus.taskId),
 )
-const quantitySummary = computed(() => order.value?.batches[0]?.quantitySummary)
+const quantitySummary = computed(() =>
+  order.value?.batches.reduce(
+    (sum, batch) => ({
+      shippedQuantity:
+        sum.shippedQuantity + (batch.quantitySummary?.shippedQuantity ?? 0),
+      surplusQuantity:
+        sum.surplusQuantity + (batch.quantitySummary?.surplusQuantity ?? 0),
+      scrappedQuantity:
+        sum.scrappedQuantity + (batch.quantitySummary?.scrappedQuantity ?? 0),
+      activeQuantity:
+        sum.activeQuantity + (batch.quantitySummary?.activeQuantity ?? 0),
+    }),
+    {
+      shippedQuantity: 0,
+      surplusQuantity: 0,
+      scrappedQuantity: 0,
+      activeQuantity: 0,
+    },
+  ),
+)
+const transfers = computed(
+  () =>
+    order.value?.batches
+      .flatMap((batch) =>
+        (batch.transfers ?? []).map((item) => ({
+          ...item,
+          batchNo: batch.batchNo,
+        })),
+      )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)) ?? [],
+)
+const scrapRecords = computed(
+  () =>
+    order.value?.batches
+      .flatMap((batch) =>
+        (batch.scrapRecords ?? []).map((item) => ({
+          ...item,
+          batchNo: batch.batchNo,
+        })),
+      )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)) ?? [],
+)
+function batchNoForTask(taskId: number) {
+  return (
+    order.value?.batches.find((batch) =>
+      batch.tasks.some((task) => task.id === taskId),
+    )?.batchNo ?? ''
+  )
+}
 const reassignStations = computed(() => {
   const task = reassignTaskItem.value
   return task
@@ -165,7 +213,10 @@ async function removeOrder() {
     await deleteOrder(order.value.id, preview.requiresConfirmation)
     await router.replace('/orders')
   } catch (error) {
-    errorMessage.value = getApiErrorMessage(error, '删除生产单失败，请刷新后重试')
+    errorMessage.value = getApiErrorMessage(
+      error,
+      '删除生产单失败，请刷新后重试',
+    )
   } finally {
     deleting.value = false
   }
@@ -293,7 +344,11 @@ onMounted(load)
         <strong>{{ statusLabels[order.status] ?? order.status }}</strong>
       </section>
       <div class="order-actions">
-        <button type="button" :disabled="deleting || actionLoading" @click="removeOrder">
+        <button
+          type="button"
+          :disabled="deleting || actionLoading"
+          @click="removeOrder"
+        >
           {{ deleting ? '正在删除…' : '删除生产单' }}
         </button>
       </div>
@@ -304,13 +359,30 @@ onMounted(load)
         </div>
         <div>
           <dt>批次</dt>
-          <dd>{{ order.batches[0]?.batchNo }}</dd>
+          <dd>{{ order.batches.map((batch) => batch.batchNo).join('、') }}</dd>
         </div>
         <div>
           <dt>交期</dt>
           <dd>{{ order.dueDate?.slice(0, 10) || '未设置' }}</dd>
         </div>
       </dl>
+      <section class="batch-overview">
+        <h3>批次 {{ order.batches[0]?.batchNo }} · 起始任务</h3>
+        <p v-for="batch in order.batches" :key="batch.id">
+          <span
+            v-for="task in batch.tasks.filter(
+              (item) => item.initialQuantity > 0,
+            )"
+            :key="task.id"
+          >
+            {{ task.initialQuantity }} 件 · {{ task.process.name }} ·
+            {{ task.workstation?.name ?? '未分配位置' }}<br />
+          </span>
+          <span v-if="!batch.tasks.some((item) => item.initialQuantity > 0)">
+            {{ batch.quantity }} 件 · {{ batch.startProcess.name }}
+          </span>
+        </p>
+      </section>
       <dl v-if="quantitySummary" class="flow-facts">
         <div>
           <dt>在制</dt>
@@ -345,7 +417,10 @@ onMounted(load)
             <span>{{ String(task.process.sort / 10).padStart(2, '0') }}</span>
             <div>
               <h3>{{ task.process.name }}</h3>
-              <small>{{ task.workstation?.name ?? '尚未分配工作位置' }}</small>
+              <small
+                >{{ batchNoForTask(task.id) }} ·
+                {{ task.workstation?.name ?? '尚未分配工作位置' }}</small
+              >
             </div>
             <strong :class="`is-${task.status.toLowerCase()}`">{{
               statusLabels[task.status]
@@ -729,13 +804,13 @@ onMounted(load)
         </button>
       </section>
 
-      <section v-if="order.batches[0]?.transfers?.length" class="history">
+      <section v-if="transfers.length" class="history">
         <p>TRANSFER HISTORY</p>
         <h2>转序记录</h2>
         <ul>
-          <li v-for="item in order.batches[0].transfers" :key="item.id">
+          <li v-for="item in transfers" :key="item.id">
             <span
-              >{{ transferLabel(item.kind) }} ·
+              >{{ item.batchNo }} · {{ transferLabel(item.kind) }} ·
               {{ item.fromTask.process.name }} →
               {{
                 item.toTask.workstation?.name ?? item.toTask.process.name
@@ -745,13 +820,13 @@ onMounted(load)
           </li>
         </ul>
       </section>
-      <section v-if="order.batches[0]?.scrapRecords?.length" class="history">
+      <section v-if="scrapRecords.length" class="history">
         <p>SCRAP HISTORY</p>
         <h2>报废记录</h2>
         <ul>
-          <li v-for="item in order.batches[0].scrapRecords" :key="item.id">
+          <li v-for="item in scrapRecords" :key="item.id">
             <span
-              >{{ item.process.name }} ·
+              >{{ item.batchNo }} · {{ item.process.name }} ·
               {{ item.workstation?.name ?? '未分配位置' }} ·
               {{ item.reason }}</span
             ><strong>{{ item.quantity }}</strong
@@ -764,6 +839,25 @@ onMounted(load)
 </template>
 
 <style scoped>
+.batch-overview {
+  margin: 12px 0;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: white;
+}
+.batch-overview h3,
+.batch-overview p {
+  margin: 0;
+}
+.batch-overview h3 {
+  font-size: 12px;
+}
+.batch-overview p {
+  margin-top: 6px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
 .order-actions {
   display: flex;
   justify-content: flex-end;

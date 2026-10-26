@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppShell from '@/components/AppShell.vue'
 import {
@@ -22,32 +22,61 @@ const form = reactive({
   quantity: 0,
   batchNo: '',
   dueDate: '',
-  startProcessId: 0,
-  startWorkstationId: 0,
   remark: '',
 })
-const selectedProcess = computed(() =>
-  processes.value.find((item) => item.id === form.startProcessId),
+type InitialTask = {
+  quantity: number
+  startProcessId: number
+  startWorkstationId: number
+}
+const initialTasks = ref<InitialTask[]>([])
+const allocatedQuantity = computed(() =>
+  initialTasks.value.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
 )
-const selectableWorkstations = computed(() => {
-  const buffers = workstations.value.filter((item) => item.type === 'BUFFER')
-  return buffers.length ? buffers : workstations.value
-})
-const hasProcessBuffer = computed(() =>
-  workstations.value.some((item) => item.type === 'BUFFER'),
+const quantityMatches = computed(
+  () =>
+    Number(form.quantity) > 0 &&
+    allocatedQuantity.value === Number(form.quantity),
 )
 
-async function loadWorkstations() {
-  form.startWorkstationId = 0
-  workstations.value = selectedProcess.value
-    ? await getWorkstations(selectedProcess.value.code)
-    : []
-  form.startWorkstationId =
-    workstations.value.find((item) => item.type === 'BUFFER')?.id ?? 0
+function selectableWorkstations(task: InitialTask) {
+  const process = processes.value.find(
+    (item) => item.id === task.startProcessId,
+  )
+  return workstations.value.filter(
+    (item) =>
+      item.processId === task.startProcessId &&
+      item.terminalKind !== 'SURPLUS' &&
+      (item.type === 'BUFFER' ||
+        (process?.executionMode === 'MACHINE' && item.type === 'DEVICE') ||
+        (process?.executionMode === 'AREA' && item.type === 'AREA')),
+  )
+}
+
+function resetTaskStation(task: InitialTask) {
+  task.startWorkstationId =
+    selectableWorkstations(task).find((item) => item.type === 'BUFFER')?.id ?? 0
+}
+
+function addTask() {
+  const task: InitialTask = {
+    quantity: 0,
+    startProcessId:
+      processes.value.find((item) => item.code === 'CASTING')?.id ??
+      processes.value[0]?.id ??
+      0,
+    startWorkstationId: 0,
+  }
+  resetTaskStation(task)
+  initialTasks.value.push(task)
 }
 
 async function submit() {
   if (loading.value) return
+  if (!quantityMatches.value) {
+    errorMessage.value = '各份起始数量之和必须等于生产单总数量'
+    return
+  }
   loading.value = true
   errorMessage.value = ''
   try {
@@ -55,11 +84,14 @@ async function submit() {
       model: form.model,
       customer: form.customer,
       quantity: Number(form.quantity),
-      batchNo: form.batchNo,
-      startProcessId: Number(form.startProcessId),
-      ...(form.startWorkstationId
-        ? { startWorkstationId: Number(form.startWorkstationId) }
-        : {}),
+      batchNo: form.batchNo.trim(),
+      initialTasks: initialTasks.value.map((item) => ({
+        quantity: Number(item.quantity),
+        startProcessId: Number(item.startProcessId),
+        ...(item.startWorkstationId
+          ? { startWorkstationId: Number(item.startWorkstationId) }
+          : {}),
+      })),
       ...(form.dueDate ? { dueDate: form.dueDate } : {}),
       ...(form.remark ? { remark: form.remark } : {}),
     })
@@ -71,12 +103,17 @@ async function submit() {
   }
 }
 
-watch(() => form.startProcessId, loadWorkstations)
 onMounted(async () => {
-  processes.value = await getProcesses()
-  const casting = processes.value.find((item) => item.code === 'CASTING')
-  form.startProcessId = casting?.id ?? processes.value[0]?.id ?? 0
-  form.batchNo = `B${new Date().toISOString().slice(2, 10).replaceAll('-', '')}-01`
+  try {
+    ;[processes.value, workstations.value] = await Promise.all([
+      getProcesses(),
+      getWorkstations(),
+    ])
+    form.batchNo = `B${new Date().toISOString().slice(2, 10).replaceAll('-', '')}-01`
+    addTask()
+  } catch (error) {
+    errorMessage.value = getApiErrorMessage(error, '起始工序和位置加载失败')
+  }
 })
 </script>
 
@@ -84,8 +121,8 @@ onMounted(async () => {
   <AppShell title="新建生产单" back>
     <section class="form-intro">
       <p>CREATE ORDER</p>
-      <h2>录入第一批生产任务</h2>
-      <span>创建后自动生成一个批次和起始工序任务。</span>
+      <h2>录入生产单与起始任务</h2>
+      <span>一个批次码下可拆成多份起始任务，每份选择自己的工序和位置。</span>
     </section>
     <form class="order-form" @submit.prevent="submit">
       <div class="field-grid">
@@ -122,38 +159,85 @@ onMounted(async () => {
         <label
           ><span>交期</span><input v-model="form.dueDate" type="date"
         /></label>
-        <label
-          ><span>起始工序 *</span
-          ><select v-model.number="form.startProcessId" required>
-            <option
-              v-for="process in processes"
-              :key="process.id"
-              :value="process.id"
-            >
-              {{ process.name }}
-            </option>
-          </select></label
-        >
       </div>
-      <label
-        ><span>起始工作位置</span
-        ><select v-model.number="form.startWorkstationId">
-          <option :value="0">
-            {{ hasProcessBuffer ? '自动进入待加工区' : '暂不分配' }}
-          </option>
-          <option
-            v-for="station in selectableWorkstations"
-            :key="station.id"
-            :value="station.id"
-          >
-            {{ station.name }} · {{ station.type }}
-          </option></select
-        ><small>{{
-          hasProcessBuffer
-            ? '配置待加工区的工序必须先进入待加工区，再分配到设备。'
-            : '暂不分配时任务保持“未排产”，可在详情中分配。'
-        }}</small></label
-      >
+      <section class="batch-section">
+        <header>
+          <div>
+            <h3>起始任务</h3>
+            <p>
+              已分配 {{ allocatedQuantity }} / {{ Number(form.quantity) || 0 }}
+            </p>
+          </div>
+          <button type="button" @click="addTask">+ 拆分一份</button>
+        </header>
+        <article
+          v-for="(task, index) in initialTasks"
+          :key="index"
+          class="batch-card"
+        >
+          <div class="batch-card-title">
+            <strong>第 {{ index + 1 }} 份</strong>
+            <button
+              v-if="initialTasks.length > 1"
+              type="button"
+              @click="initialTasks.splice(index, 1)"
+            >
+              移除
+            </button>
+          </div>
+          <div class="field-grid">
+            <label
+              ><span>数量 *</span
+              ><input
+                v-model.number="task.quantity"
+                required
+                type="number"
+                min="1"
+                inputmode="numeric"
+            /></label>
+            <label
+              ><span>起始工序 *</span>
+              <select
+                v-model.number="task.startProcessId"
+                required
+                @change="resetTaskStation(task)"
+              >
+                <option
+                  v-for="process in processes"
+                  :key="process.id"
+                  :value="process.id"
+                >
+                  {{ process.name }}
+                </option>
+              </select>
+            </label>
+            <label
+              ><span>起始工作位置</span>
+              <select v-model.number="task.startWorkstationId">
+                <option :value="0">
+                  {{
+                    selectableWorkstations(task).some(
+                      (item) => item.type === 'BUFFER',
+                    )
+                      ? '自动进入待加工区'
+                      : '暂不分配'
+                  }}
+                </option>
+                <option
+                  v-for="station in selectableWorkstations(task)"
+                  :key="station.id"
+                  :value="station.id"
+                >
+                  {{ station.name }} · {{ station.type }}
+                </option>
+              </select>
+            </label>
+          </div>
+        </article>
+        <small
+          >所有起始任务共用上方批次号；进入相同工序和位置时可按现有规则合并。</small
+        >
+      </section>
       <label
         ><span>备注</span
         ><textarea
@@ -167,7 +251,7 @@ onMounted(async () => {
       <button
         class="submit-button"
         type="submit"
-        :disabled="loading || !form.startProcessId"
+        :disabled="loading || !initialTasks.length || !quantityMatches"
       >
         {{ loading ? '正在创建…' : '创建生产单' }}
       </button>
@@ -217,6 +301,43 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px 12px;
+}
+.batch-section {
+  display: grid;
+  gap: 12px;
+}
+.batch-section header,
+.batch-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.batch-section h3,
+.batch-section p {
+  margin: 0;
+}
+.batch-section p,
+.batch-section > small {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+}
+.batch-section button {
+  padding: 7px 10px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
+  background: white;
+  color: var(--color-brand);
+  font-size: 11px;
+  font-weight: 700;
+}
+.batch-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: #fafbfc;
 }
 label > span {
   display: block;

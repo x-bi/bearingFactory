@@ -19,6 +19,7 @@ describe('production flow integration', () => {
   let roughStationId: number
   let roughStation2Id: number
   let finishBufferId: number
+  let finishProcessId: number
   let finishStationId: number
   let packagingProcessId: number
   let packagingBufferId: number
@@ -71,6 +72,7 @@ describe('production flow integration', () => {
     roughStationId = roughStation.id
     roughStation2Id = roughStation2.id
     finishBufferId = finishBuffer.id
+    finishProcessId = finishBuffer.processId!
     finishStationId = finishStation.id
     packagingProcessId = packaging.id
     packagingBufferId = packagingBuffer.id
@@ -99,60 +101,251 @@ describe('production flow integration', () => {
   })
 
   it('soft deletes an untouched order and hides it from queries', async () => {
-    const order = await orders.create({
-      model: '6208', customer: '测试客户', quantity: 10, batchNo: 'DELETE-001',
-      startProcessId: roughProcessId, startWorkstationId: roughBufferId,
-    }, adminId)
-    expect((await orders.previewDeletion(order.id)).requiresConfirmation).toBe(false)
+    const order = await orders.create(
+      {
+        model: '6208',
+        customer: '测试客户',
+        quantity: 10,
+        batchNo: 'DELETE-001',
+        startProcessId: roughProcessId,
+        startWorkstationId: roughBufferId,
+      },
+      adminId,
+    )
+    expect((await orders.previewDeletion(order.id)).requiresConfirmation).toBe(
+      false,
+    )
     await orders.remove(order.id, false, adminId)
-    expect(await prisma.productionOrder.findUnique({ where: { id: order.id } })).toMatchObject({
+    expect(
+      await prisma.productionOrder.findUnique({ where: { id: order.id } }),
+    ).toMatchObject({
       deletedAt: expect.any(Date),
     })
-    expect(await prisma.batch.findUnique({ where: { id: order.batches[0].id } })).toMatchObject({
+    expect(
+      await prisma.batch.findUnique({ where: { id: order.batches[0].id } }),
+    ).toMatchObject({
       deletedAt: expect.any(Date),
     })
-    expect(await prisma.processTask.findUnique({ where: { id: order.batches[0].tasks[0].id } })).toMatchObject({
+    expect(
+      await prisma.processTask.findUnique({
+        where: { id: order.batches[0].tasks[0].id },
+      }),
+    ).toMatchObject({
       deletedAt: expect.any(Date),
     })
     expect((await orders.list({ page: 1, pageSize: 20 })).items).toHaveLength(0)
     await expect(orders.detail(order.id)).rejects.toThrow('生产单不存在')
-    await expect(tasks.start(order.batches[0].tasks[0].id, adminId)).rejects.toThrow('加工任务不存在')
+    await expect(
+      tasks.start(order.batches[0].tasks[0].id, adminId),
+    ).rejects.toThrow('加工任务不存在')
   })
 
   it('requires high risk confirmation and soft deletes progressed related records', async () => {
-    const order = await orders.create({
-      model: '6209', customer: '测试客户', quantity: 10, batchNo: 'DELETE-002',
-      startProcessId: roughProcessId, startWorkstationId: roughBufferId,
-    }, adminId)
+    const order = await orders.create(
+      {
+        model: '6209',
+        customer: '测试客户',
+        quantity: 10,
+        batchNo: 'DELETE-002',
+        startProcessId: roughProcessId,
+        startWorkstationId: roughBufferId,
+      },
+      adminId,
+    )
     const batchId = order.batches[0].id
     const sourceId = order.batches[0].tasks[0].id
-    const next = await prisma.processTask.create({ data: {
-      batchId, processId: packagingProcessId, workstationId: packagingBufferId,
-      plannedQuantity: 3, status: 'PENDING',
-    } })
-    await prisma.processTask.update({ where: { id: sourceId }, data: {
-      completedQuantity: 3, status: 'COMPLETED', completedAt: new Date(),
-    } })
-    const transfer = await prisma.transfer.create({ data: {
-      requestId: 'delete-transfer-001', batchId, fromTaskId: sourceId,
-      toTaskId: next.id, quantity: 3, operatorId: adminId,
-    } })
-    const scrap = await prisma.scrapRecord.create({ data: {
-      requestId: 'delete-scrap-001', batchId, taskId: sourceId,
-      processId: roughProcessId, quantity: 1, reason: '测试', operatorId: adminId,
-    } })
+    const next = await prisma.processTask.create({
+      data: {
+        batchId,
+        processId: packagingProcessId,
+        workstationId: packagingBufferId,
+        plannedQuantity: 3,
+        status: 'PENDING',
+      },
+    })
+    await prisma.processTask.update({
+      where: { id: sourceId },
+      data: {
+        completedQuantity: 3,
+        status: 'COMPLETED',
+        completedAt: new Date(),
+      },
+    })
+    const transfer = await prisma.transfer.create({
+      data: {
+        requestId: 'delete-transfer-001',
+        batchId,
+        fromTaskId: sourceId,
+        toTaskId: next.id,
+        quantity: 3,
+        operatorId: adminId,
+      },
+    })
+    const scrap = await prisma.scrapRecord.create({
+      data: {
+        requestId: 'delete-scrap-001',
+        batchId,
+        taskId: sourceId,
+        processId: roughProcessId,
+        quantity: 1,
+        reason: '测试',
+        operatorId: adminId,
+      },
+    })
     const preview = await orders.previewDeletion(order.id)
     expect(preview).toMatchObject({
-      requiresConfirmation: true, progressedTasks: 1, otherProcessTasks: 1,
-      transferCount: 1, scrapCount: 1,
+      requiresConfirmation: true,
+      progressedTasks: 1,
+      otherProcessTasks: 1,
+      transferCount: 1,
+      scrapCount: 1,
     })
-    await expect(orders.remove(order.id, false, adminId)).rejects.toBeInstanceOf(ConflictException)
-    expect((await prisma.productionOrder.findUniqueOrThrow({ where: { id: order.id } })).deletedAt).toBeNull()
+    await expect(
+      orders.remove(order.id, false, adminId),
+    ).rejects.toBeInstanceOf(ConflictException)
+    expect(
+      (
+        await prisma.productionOrder.findUniqueOrThrow({
+          where: { id: order.id },
+        })
+      ).deletedAt,
+    ).toBeNull()
     await orders.remove(order.id, true, adminId)
-    expect((await prisma.processTask.findUniqueOrThrow({ where: { id: next.id } })).deletedAt).toBeInstanceOf(Date)
-    expect((await prisma.transfer.findUniqueOrThrow({ where: { id: transfer.id } })).deletedAt).toBeInstanceOf(Date)
-    expect((await prisma.scrapRecord.findUniqueOrThrow({ where: { id: scrap.id } })).deletedAt).toBeInstanceOf(Date)
-    await expect(orders.remove(order.id, true, adminId)).rejects.toThrow('生产单不存在')
+    expect(
+      (await prisma.processTask.findUniqueOrThrow({ where: { id: next.id } }))
+        .deletedAt,
+    ).toBeInstanceOf(Date)
+    expect(
+      (await prisma.transfer.findUniqueOrThrow({ where: { id: transfer.id } }))
+        .deletedAt,
+    ).toBeInstanceOf(Date)
+    expect(
+      (await prisma.scrapRecord.findUniqueOrThrow({ where: { id: scrap.id } }))
+        .deletedAt,
+    ).toBeInstanceOf(Date)
+    await expect(orders.remove(order.id, true, adminId)).rejects.toThrow(
+      '生产单不存在',
+    )
+  })
+
+  it('keeps one batch for split starting tasks and merges them when paths meet', async () => {
+    const order = await orders.create(
+      {
+        model: 'START-SPLIT',
+        customer: '起点拆分客户',
+        quantity: 120,
+        batchNo: 'START-ONE',
+        initialTasks: [
+          {
+            quantity: 40,
+            startProcessId: roughProcessId,
+            startWorkstationId: roughStationId,
+          },
+          {
+            quantity: 20,
+            startProcessId: roughProcessId,
+            startWorkstationId: roughStation2Id,
+          },
+          {
+            quantity: 60,
+            startProcessId: finishProcessId,
+            startWorkstationId: finishBufferId,
+          },
+        ],
+      },
+      adminId,
+    )
+    expect(order.batches).toHaveLength(1)
+    const batch = order.batches[0]
+    expect(batch.batchNo).toBe('START-ONE')
+    expect(batch.tasks).toHaveLength(3)
+    const rough = batch.tasks.find(
+      (task) => task.workstationId === roughStationId,
+    )!
+    const otherRough = batch.tasks.find(
+      (task) => task.workstationId === roughStation2Id,
+    )!
+    const finish = batch.tasks.find(
+      (task) => task.workstationId === finishBufferId,
+    )!
+    expect(rough).toMatchObject({
+      plannedQuantity: 40,
+      initialQuantity: 40,
+      workstationId: roughStationId,
+      status: 'PENDING',
+    })
+    expect(finish).toMatchObject({
+      plannedQuantity: 60,
+      initialQuantity: 60,
+      workstationId: finishBufferId,
+      status: 'PENDING',
+    })
+    expect(otherRough).toMatchObject({
+      plannedQuantity: 20,
+      workstationId: roughStation2Id,
+      status: 'PENDING',
+    })
+    await tasks.start(rough.id, adminId)
+    await tasks.updateCompleted(rough.id, { completedQuantity: 40 }, adminId)
+    await tasks.complete(rough.id, adminId)
+    const movement = await tasks.transfer(
+      rough.id,
+      {
+        requestId: 'split-start-meet-001',
+        quantity: 40,
+        targetWorkstationId: finishBufferId,
+      },
+      adminId,
+    )
+    expect(movement.toTask.batchId).toBe(batch.id)
+    expect(movement.toTask.id).toBe(finish.id)
+    expect(movement.toTask).toMatchObject({
+      plannedQuantity: 100,
+      initialQuantity: 60,
+    })
+    const assigned = await tasks.assign(
+      finish.id,
+      {
+        requestId: 'split-start-finish-assign',
+        quantity: 100,
+        workstationId: finishStationId,
+      },
+      adminId,
+    )
+    await tasks.start(assigned.toTask.id, adminId)
+    const processing = await prisma.processTask.findUniqueOrThrow({
+      where: { id: assigned.toTask.id },
+      include: { process: true },
+    })
+    expect(await flowState.getDisplayStatus(processing)).toBe(
+      'CROSS_PROCESSING',
+    )
+    await tasks.start(otherRough.id, adminId)
+    await tasks.updateCompleted(
+      otherRough.id,
+      { completedQuantity: 20 },
+      adminId,
+    )
+    await tasks.complete(otherRough.id, adminId)
+    expect(await flowState.getDisplayStatus(processing)).toBe('PROCESSING')
+    expect((await orders.detail(order.id)).batches).toHaveLength(1)
+    await expect(
+      orders.create(
+        {
+          model: 'INVALID-SPLIT',
+          customer: '测试',
+          quantity: 100,
+          batchNo: 'INVALID-SPLIT',
+          initialTasks: [
+            {
+              quantity: 40,
+              startProcessId: roughProcessId,
+            },
+          ],
+        },
+        adminId,
+      ),
+    ).rejects.toThrow('各份起始数量之和必须等于生产单总数量')
   })
 
   it('supports partial transfer, idempotency and cross-process status', async () => {

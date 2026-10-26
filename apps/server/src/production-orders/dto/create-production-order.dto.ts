@@ -1,5 +1,7 @@
 import { Type } from 'class-transformer'
 import {
+  ArrayMinSize,
+  IsArray,
   IsDateString,
   IsInt,
   IsNotEmpty,
@@ -7,7 +9,26 @@ import {
   IsString,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator'
+
+export class InitialTaskDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  quantity!: number
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  startProcessId!: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  startWorkstationId?: number
+}
 
 export class CreateProductionOrderDto {
   @IsString()
@@ -31,16 +52,26 @@ export class CreateProductionOrderDto {
   batchNo!: string
 
   @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => InitialTaskDto)
+  initialTasks?: InitialTaskDto[]
+
+  @IsOptional()
   @IsDateString()
   dueDate?: string
-
-  @Type(() => Number)
-  @IsInt()
-  startProcessId!: number
 
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @Min(1)
+  startProcessId?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   startWorkstationId?: number
 
   @IsOptional()

@@ -67,6 +67,7 @@ export interface ProcessTaskItem {
   processId: number
   workstationId: number | null
   plannedQuantity: number
+  initialQuantity: number
   completedQuantity: number
   scrappedQuantity: number
   assignedOutQuantity: number
@@ -129,8 +130,13 @@ export interface CreateOrderPayload {
   quantity: number
   batchNo: string
   dueDate?: string
-  startProcessId: number
+  startProcessId?: number
   startWorkstationId?: number
+  initialTasks?: Array<{
+    quantity: number
+    startProcessId: number
+    startWorkstationId?: number
+  }>
   remark?: string
 }
 
@@ -181,13 +187,22 @@ export interface OrderDeletionPreview {
 }
 
 export async function getOrderDeletionPreview(id: number) {
-  return (await http.get<OrderDeletionPreview>(`/production-orders/${id}/deletion-preview`)).data
+  return (
+    await http.get<OrderDeletionPreview>(
+      `/production-orders/${id}/deletion-preview`,
+    )
+  ).data
 }
 
 export async function deleteOrder(id: number, confirmRisk: boolean) {
-  return (await http.delete<{ id: number; deleted: true }>(`/production-orders/${id}`, {
-    params: { confirmRisk },
-  })).data
+  return (
+    await http.delete<{ id: number; deleted: true }>(
+      `/production-orders/${id}`,
+      {
+        params: { confirmRisk },
+      },
+    )
+  ).data
 }
 
 export async function createOrder(payload: CreateOrderPayload) {

@@ -1,0 +1,1 @@
+ALTER TABLE "ProcessTask" ADD COLUMN "initialQuantity" INTEGER NOT NULL DEFAULT 0;

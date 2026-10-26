@@ -127,6 +127,7 @@ model ProcessTask {
   processId         Int
   workstationId     Int?
   plannedQuantity   Int
+  initialQuantity   Int          @default(0)
   completedQuantity Int          @default(0)
   scrappedQuantity  Int          @default(0)
   status            String       @default("PENDING")
