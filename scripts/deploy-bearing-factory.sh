@@ -182,7 +182,24 @@ docker system df || true
 echo
 echo "Fetching latest code from origin/$BRANCH..."
 
-git fetch --prune origin "$BRANCH"
+echo "Git binary: $(command -v git)"
+echo "Git version: $(git --version)"
+
+fetch_remote() {
+  local attempt
+  for attempt in 1 2 3; do
+    echo "Fetch attempt $attempt/3 (HTTP/1.1)..."
+    if git -c http.version=HTTP/1.1 fetch --prune origin "$BRANCH"; then
+      return 0
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      sleep "$((attempt * 5))"
+    fi
+  done
+  return 1
+}
+
+fetch_remote
 
 REMOTE_COMMIT="$(git rev-parse "origin/$BRANCH")"
 LOCAL_COMMIT="$(git rev-parse HEAD)"
