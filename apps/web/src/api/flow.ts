@@ -169,6 +169,27 @@ export async function getOrder(id: number) {
   return (await http.get<ProductionOrderItem>(`/production-orders/${id}`)).data
 }
 
+export interface OrderDeletionPreview {
+  orderNo: string
+  batchCount: number
+  taskCount: number
+  progressedTasks: number
+  otherProcessTasks: number
+  transferCount: number
+  scrapCount: number
+  requiresConfirmation: boolean
+}
+
+export async function getOrderDeletionPreview(id: number) {
+  return (await http.get<OrderDeletionPreview>(`/production-orders/${id}/deletion-preview`)).data
+}
+
+export async function deleteOrder(id: number, confirmRisk: boolean) {
+  return (await http.delete<{ id: number; deleted: true }>(`/production-orders/${id}`, {
+    params: { confirmRisk },
+  })).data
+}
+
 export async function createOrder(payload: CreateOrderPayload) {
   return (await http.post<ProductionOrderItem>('/production-orders', payload))
     .data

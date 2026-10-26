@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -36,5 +37,19 @@ export class ProductionOrdersController {
   @Get(':id')
   detail(@Param('id', ParseIntPipe) id: number) {
     return this.service.detail(id)
+  }
+
+  @Get(':id/deletion-preview')
+  previewDeletion(@Param('id', ParseIntPipe) id: number) {
+    return this.service.previewDeletion(id)
+  }
+
+  @Delete(':id')
+  remove(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('confirmRisk') confirmRisk: string | undefined,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.service.remove(id, confirmRisk === 'true', request.user.id)
   }
 }

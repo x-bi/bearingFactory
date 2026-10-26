@@ -88,6 +88,7 @@ model ProductionOrder {
   createdById Int
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
   createdBy   User     @relation("OrderCreator", fields: [createdById], references: [id])
   batches     Batch[]
 
@@ -95,6 +96,7 @@ model ProductionOrder {
   @@index([model])
   @@index([customer])
   @@index([dueDate])
+  @@index([deletedAt])
 }
 
 model Batch {
@@ -106,6 +108,7 @@ model Batch {
   status         String          @default("UNSCHEDULED")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
+  deletedAt      DateTime?
   order          ProductionOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   startProcess   Process         @relation("BatchStartProcess", fields: [startProcessId], references: [id])
   tasks          ProcessTask[]
@@ -115,6 +118,7 @@ model Batch {
   @@unique([orderId, batchNo])
   @@index([startProcessId])
   @@index([status])
+  @@index([deletedAt])
 }
 
 model ProcessTask {
@@ -130,6 +134,7 @@ model ProcessTask {
   completedAt       DateTime?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
+  deletedAt         DateTime?
   batch             Batch        @relation(fields: [batchId], references: [id], onDelete: Cascade)
   process           Process      @relation(fields: [processId], references: [id])
   workstation       Workstation? @relation(fields: [workstationId], references: [id])
@@ -140,6 +145,7 @@ model ProcessTask {
   @@index([batchId, processId])
   @@index([workstationId, status])
   @@index([status])
+  @@index([deletedAt])
 }
 
 model Transfer {
@@ -153,6 +159,7 @@ model Transfer {
   remark     String?
   operatorId Int
   createdAt  DateTime    @default(now())
+  deletedAt  DateTime?
   batch      Batch       @relation(fields: [batchId], references: [id], onDelete: Cascade)
   fromTask   ProcessTask @relation("TransferFromTask", fields: [fromTaskId], references: [id])
   toTask     ProcessTask @relation("TransferToTask", fields: [toTaskId], references: [id])
@@ -162,6 +169,7 @@ model Transfer {
   @@index([toTaskId])
   @@index([batchId])
   @@index([kind, createdAt])
+  @@index([deletedAt])
 }
 
 model ScrapRecord {
@@ -176,6 +184,7 @@ model ScrapRecord {
   remark        String?
   operatorId    Int
   createdAt     DateTime     @default(now())
+  deletedAt     DateTime?
   batch         Batch        @relation(fields: [batchId], references: [id], onDelete: Cascade)
   task          ProcessTask  @relation(fields: [taskId], references: [id])
   process       Process      @relation(fields: [processId], references: [id])
@@ -186,6 +195,7 @@ model ScrapRecord {
   @@index([taskId])
   @@index([processId])
   @@index([workstationId])
+  @@index([deletedAt])
 }
 
 model OperationLog {

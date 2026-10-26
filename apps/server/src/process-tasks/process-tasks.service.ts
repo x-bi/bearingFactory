@@ -44,13 +44,13 @@ export class ProcessTasksService {
   ) {}
 
   private async findTask(tx: Prisma.TransactionClient, id: number) {
-    const task = await tx.processTask.findUnique({
-      where: { id },
+    const task = await tx.processTask.findFirst({
+      where: { id, deletedAt: null, batch: { deletedAt: null, order: { deletedAt: null } } },
       include: {
         process: true,
         workstation: true,
         batch: { include: { order: true, startProcess: true } },
-        outgoingTransfers: true,
+        outgoingTransfers: { where: { deletedAt: null } },
       },
     })
     if (!task) throw new NotFoundException('加工任务不存在')
@@ -128,6 +128,7 @@ export class ProcessTasksService {
         id: { not: taskId },
         workstationId,
         status: 'PROCESSING',
+        deletedAt: null,
       },
     })
     if (occupied)
@@ -146,6 +147,7 @@ export class ProcessTasksService {
         processId: source.processId,
         workstationId,
         status: { not: 'COMPLETED' },
+        deletedAt: null,
       },
       orderBy: { createdAt: 'asc' },
     })
@@ -172,6 +174,7 @@ export class ProcessTasksService {
         include: { toTask: true },
       })
       if (existing) {
+        if (existing.deletedAt) throw new NotFoundException('加工任务不存在')
         if (
           existing.kind !== TransferKind.ASSIGN ||
           existing.fromTaskId !== id ||
@@ -357,6 +360,7 @@ export class ProcessTasksService {
         include: { toTask: true },
       })
       if (existing) {
+        if (existing.deletedAt) throw new NotFoundException('加工任务不存在')
         if (
           existing.kind !== TransferKind.REASSIGN ||
           existing.fromTaskId !== id ||
@@ -419,6 +423,7 @@ export class ProcessTasksService {
           where: { requestId: dto.requestId },
         })
         if (existing) {
+          if (existing.deletedAt) throw new NotFoundException('加工任务不存在')
           if (existing.taskId !== id || existing.quantity !== dto.quantity) {
             throw new ConflictException('requestId 已用于不同的报废请求')
           }
@@ -490,6 +495,7 @@ export class ProcessTasksService {
         include: { toTask: true },
       })
       if (existing) {
+        if (existing.deletedAt) throw new NotFoundException('加工任务不存在')
         if (
           existing.kind !== TransferKind.TO_SURPLUS ||
           existing.fromTaskId !== id ||
@@ -558,6 +564,7 @@ export class ProcessTasksService {
         include: { toTask: true },
       })
       if (existing) {
+        if (existing.deletedAt) throw new NotFoundException('加工任务不存在')
         if (
           existing.kind !== TransferKind.NEXT_PROCESS ||
           existing.fromTaskId !== id ||
@@ -608,6 +615,7 @@ export class ProcessTasksService {
           processId: nextProcess.id,
           workstationId: target.id,
           status: { not: 'COMPLETED' },
+          deletedAt: null,
         },
         orderBy: { createdAt: 'asc' },
       })

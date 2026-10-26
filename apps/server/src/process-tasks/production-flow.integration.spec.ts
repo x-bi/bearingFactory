@@ -98,6 +98,63 @@ describe('production flow integration', () => {
     await prisma.$disconnect()
   })
 
+  it('soft deletes an untouched order and hides it from queries', async () => {
+    const order = await orders.create({
+      model: '6208', customer: '测试客户', quantity: 10, batchNo: 'DELETE-001',
+      startProcessId: roughProcessId, startWorkstationId: roughBufferId,
+    }, adminId)
+    expect((await orders.previewDeletion(order.id)).requiresConfirmation).toBe(false)
+    await orders.remove(order.id, false, adminId)
+    expect(await prisma.productionOrder.findUnique({ where: { id: order.id } })).toMatchObject({
+      deletedAt: expect.any(Date),
+    })
+    expect(await prisma.batch.findUnique({ where: { id: order.batches[0].id } })).toMatchObject({
+      deletedAt: expect.any(Date),
+    })
+    expect(await prisma.processTask.findUnique({ where: { id: order.batches[0].tasks[0].id } })).toMatchObject({
+      deletedAt: expect.any(Date),
+    })
+    expect((await orders.list({ page: 1, pageSize: 20 })).items).toHaveLength(0)
+    await expect(orders.detail(order.id)).rejects.toThrow('生产单不存在')
+    await expect(tasks.start(order.batches[0].tasks[0].id, adminId)).rejects.toThrow('加工任务不存在')
+  })
+
+  it('requires high risk confirmation and soft deletes progressed related records', async () => {
+    const order = await orders.create({
+      model: '6209', customer: '测试客户', quantity: 10, batchNo: 'DELETE-002',
+      startProcessId: roughProcessId, startWorkstationId: roughBufferId,
+    }, adminId)
+    const batchId = order.batches[0].id
+    const sourceId = order.batches[0].tasks[0].id
+    const next = await prisma.processTask.create({ data: {
+      batchId, processId: packagingProcessId, workstationId: packagingBufferId,
+      plannedQuantity: 3, status: 'PENDING',
+    } })
+    await prisma.processTask.update({ where: { id: sourceId }, data: {
+      completedQuantity: 3, status: 'COMPLETED', completedAt: new Date(),
+    } })
+    const transfer = await prisma.transfer.create({ data: {
+      requestId: 'delete-transfer-001', batchId, fromTaskId: sourceId,
+      toTaskId: next.id, quantity: 3, operatorId: adminId,
+    } })
+    const scrap = await prisma.scrapRecord.create({ data: {
+      requestId: 'delete-scrap-001', batchId, taskId: sourceId,
+      processId: roughProcessId, quantity: 1, reason: '测试', operatorId: adminId,
+    } })
+    const preview = await orders.previewDeletion(order.id)
+    expect(preview).toMatchObject({
+      requiresConfirmation: true, progressedTasks: 1, otherProcessTasks: 1,
+      transferCount: 1, scrapCount: 1,
+    })
+    await expect(orders.remove(order.id, false, adminId)).rejects.toBeInstanceOf(ConflictException)
+    expect((await prisma.productionOrder.findUniqueOrThrow({ where: { id: order.id } })).deletedAt).toBeNull()
+    await orders.remove(order.id, true, adminId)
+    expect((await prisma.processTask.findUniqueOrThrow({ where: { id: next.id } })).deletedAt).toBeInstanceOf(Date)
+    expect((await prisma.transfer.findUniqueOrThrow({ where: { id: transfer.id } })).deletedAt).toBeInstanceOf(Date)
+    expect((await prisma.scrapRecord.findUniqueOrThrow({ where: { id: scrap.id } })).deletedAt).toBeInstanceOf(Date)
+    await expect(orders.remove(order.id, true, adminId)).rejects.toThrow('生产单不存在')
+  })
+
   it('supports partial transfer, idempotency and cross-process status', async () => {
     const order = await orders.create(
       {

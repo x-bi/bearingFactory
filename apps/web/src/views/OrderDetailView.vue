@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import AppShell from '@/components/AppShell.vue'
 import {
   assignTask,
+  deleteOrder,
   getOrder,
+  getOrderDeletionPreview,
   getProcesses,
   getWorkstations,
   moveTaskToSurplus,
@@ -23,11 +25,13 @@ import { createRequestId } from '@/utils/request-id'
 import { refreshPreservingScroll } from '@/utils/refresh-preserving-scroll'
 
 const route = useRoute()
+const router = useRouter()
 const order = ref<ProductionOrderItem>()
 const processes = ref<ProcessItem[]>([])
 const workstations = ref<WorkstationItem[]>([])
 const loading = ref(true)
 const actionLoading = ref(false)
+const deleting = ref(false)
 const notice = ref('')
 const errorMessage = ref('')
 const quantities = reactive<Record<number, number>>({})
@@ -145,6 +149,25 @@ async function run(message: string, action: () => Promise<unknown>) {
     return false
   } finally {
     actionLoading.value = false
+  }
+}
+
+async function removeOrder() {
+  if (!order.value || deleting.value || actionLoading.value) return
+  deleting.value = true
+  errorMessage.value = ''
+  try {
+    const preview = await getOrderDeletionPreview(order.value.id)
+    const message = preview.requiresConfirmation
+      ? `高危操作：生产单 ${preview.orderNo} 已有关联加工数据。\n已处理任务 ${preview.progressedTasks} 条，其他工序任务 ${preview.otherProcessTasks} 条，转序/分配记录 ${preview.transferCount} 条，报废记录 ${preview.scrapCount} 条。\n确认后将逻辑删除生产单及全部关联批次、任务和记录，页面中将不再显示。确定继续吗？`
+      : `确定删除生产单 ${preview.orderNo} 吗？关联批次和初始任务也会逻辑删除。`
+    if (!window.confirm(message)) return
+    await deleteOrder(order.value.id, preview.requiresConfirmation)
+    await router.replace('/orders')
+  } catch (error) {
+    errorMessage.value = getApiErrorMessage(error, '删除生产单失败，请刷新后重试')
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -269,6 +292,11 @@ onMounted(load)
         </div>
         <strong>{{ statusLabels[order.status] ?? order.status }}</strong>
       </section>
+      <div class="order-actions">
+        <button type="button" :disabled="deleting || actionLoading" @click="removeOrder">
+          {{ deleting ? '正在删除…' : '删除生产单' }}
+        </button>
+      </div>
       <dl class="order-facts">
         <div>
           <dt>总数量</dt>
@@ -736,6 +764,23 @@ onMounted(load)
 </template>
 
 <style scoped>
+.order-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 10px 0;
+}
+.order-actions button {
+  padding: 8px 12px;
+  border: 1px solid var(--color-danger);
+  border-radius: 4px;
+  background: white;
+  color: var(--color-danger);
+  font-size: 12px;
+  font-weight: 700;
+}
+.order-actions button:disabled {
+  opacity: 0.5;
+}
 .order-identity {
   display: flex;
   justify-content: space-between;

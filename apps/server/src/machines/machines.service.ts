@@ -87,7 +87,7 @@ export class MachinesService {
         if (!machine) throw new NotFoundException('机器不存在')
         if (dto.enabled === false) {
           const active = await tx.processTask.findFirst({
-            where: { workstationId: id, status: 'PROCESSING' },
+            where: { workstationId: id, status: 'PROCESSING', deletedAt: null },
           })
           if (active)
             throw new ConflictException('机器仍有加工中的生产单，不能停用')

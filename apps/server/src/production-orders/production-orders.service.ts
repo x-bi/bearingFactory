@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
@@ -14,6 +15,7 @@ export class ProductionOrdersService {
 
   async list(query: ListProductionOrdersDto) {
     const where: Prisma.ProductionOrderWhereInput = {
+      deletedAt: null,
       ...(query.status ? { status: query.status } : {}),
       ...(query.keyword
         ? {
@@ -21,7 +23,14 @@ export class ProductionOrdersService {
               { orderNo: { contains: query.keyword } },
               { model: { contains: query.keyword } },
               { customer: { contains: query.keyword } },
-              { batches: { some: { batchNo: { contains: query.keyword } } } },
+              {
+                batches: {
+                  some: {
+                    deletedAt: null,
+                    batchNo: { contains: query.keyword },
+                  },
+                },
+              },
             ],
           }
         : {}),
@@ -56,11 +65,13 @@ export class ProductionOrdersService {
         .slice((query.page - 1) * query.pageSize, query.page * query.pageSize)
         .map((item) => item.id)
       const unorderedItems = await tx.productionOrder.findMany({
-        where: { id: { in: pageIds } },
+        where: { id: { in: pageIds }, deletedAt: null },
         include: {
           batches: {
+            where: { deletedAt: null },
             include: {
               tasks: {
+                where: { deletedAt: null },
                 include: { process: true },
                 orderBy: { createdAt: 'desc' },
               },
@@ -168,22 +179,25 @@ export class ProductionOrdersService {
   }
 
   async detail(id: number) {
-    const order = await this.prisma.productionOrder.findUnique({
-      where: { id },
+    const order = await this.prisma.productionOrder.findFirst({
+      where: { id, deletedAt: null },
       include: {
         createdBy: { select: { id: true, name: true, username: true } },
         batches: {
+          where: { deletedAt: null },
           include: {
             startProcess: true,
             tasks: {
+              where: { deletedAt: null },
               orderBy: [{ process: { sort: 'asc' } }, { createdAt: 'asc' }],
               include: {
                 process: true,
                 workstation: true,
-                outgoingTransfers: true,
+                outgoingTransfers: { where: { deletedAt: null } },
               },
             },
             transfers: {
+              where: { deletedAt: null },
               orderBy: { createdAt: 'desc' },
               include: {
                 fromTask: { include: { process: true } },
@@ -192,6 +206,7 @@ export class ProductionOrdersService {
               },
             },
             scrapRecords: {
+              where: { deletedAt: null },
               orderBy: { createdAt: 'desc' },
               include: {
                 process: true,
@@ -261,5 +276,81 @@ export class ProductionOrdersService {
         }
       }),
     }
+  }
+
+  private async deletionSummary(tx: Prisma.TransactionClient, id: number) {
+    const order = await tx.productionOrder.findFirst({
+      where: { id, deletedAt: null },
+      include: {
+        batches: {
+          where: { deletedAt: null },
+          include: {
+            tasks: {
+              where: { deletedAt: null },
+              select: {
+                status: true,
+                completedQuantity: true,
+                scrappedQuantity: true,
+                startedAt: true,
+                processId: true,
+              },
+            },
+            transfers: { where: { deletedAt: null }, select: { id: true } },
+            scrapRecords: { where: { deletedAt: null }, select: { id: true } },
+          },
+        },
+      },
+    })
+    if (!order) throw new NotFoundException('生产单不存在')
+    const tasks = order.batches.flatMap((batch) => batch.tasks)
+    const otherProcessTasks = order.batches.reduce(
+      (sum, batch) => sum + batch.tasks.filter((task) => task.processId !== batch.startProcessId).length,
+      0,
+    )
+    const progressedTasks = tasks.filter((task) =>
+      Boolean(task.startedAt) || task.completedQuantity > 0 ||
+      task.scrappedQuantity > 0 ||
+      ['PROCESSING', 'PAUSED', 'COMPLETED'].includes(task.status),
+    ).length
+    const transferCount = order.batches.reduce((sum, batch) => sum + batch.transfers.length, 0)
+    const scrapCount = order.batches.reduce((sum, batch) => sum + batch.scrapRecords.length, 0)
+    return {
+      orderNo: order.orderNo,
+      batchCount: order.batches.length,
+      taskCount: tasks.length,
+      progressedTasks,
+      otherProcessTasks,
+      transferCount,
+      scrapCount,
+      requiresConfirmation:
+        order.status !== 'PENDING' && order.status !== 'UNSCHEDULED' ||
+        progressedTasks > 0 || otherProcessTasks > 0 || transferCount > 0 ||
+        scrapCount > 0 || tasks.length > order.batches.length,
+    }
+  }
+
+  previewDeletion(id: number) {
+    return this.prisma.$transaction((tx) => this.deletionSummary(tx, id))
+  }
+
+  remove(id: number, confirmRisk: boolean, userId: number) {
+    return this.prisma.$transaction(async (tx) => {
+      const summary = await this.deletionSummary(tx, id)
+      if (summary.requiresConfirmation && !confirmRisk) {
+        throw new ConflictException('生产单已有加工或关联记录，请确认高危删除')
+      }
+      const deletedAt = new Date()
+      const batch = { orderId: id, deletedAt: null }
+      await tx.scrapRecord.updateMany({ where: { batch, deletedAt: null }, data: { deletedAt } })
+      await tx.transfer.updateMany({ where: { batch, deletedAt: null }, data: { deletedAt } })
+      await tx.processTask.updateMany({ where: { batch, deletedAt: null }, data: { deletedAt } })
+      await tx.batch.updateMany({ where: { orderId: id, deletedAt: null }, data: { deletedAt } })
+      await tx.productionOrder.update({ where: { id }, data: { deletedAt } })
+      await tx.operationLog.create({ data: {
+        userId, action: 'DELETE_ORDER', entityType: 'ProductionOrder', entityId: id,
+        payload: JSON.stringify(summary),
+      } })
+      return { id, deleted: true }
+    })
   }
 }

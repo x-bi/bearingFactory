@@ -10,19 +10,22 @@ export class SurplusService {
   async list(query: ListSurplusDto) {
     const where: Prisma.TransferWhereInput = {
       kind: 'TO_SURPLUS',
-      ...(query.keyword
-        ? {
-            batch: {
-              is: {
+      deletedAt: null,
+      batch: {
+        is: {
+          deletedAt: null,
+          order: { deletedAt: null },
+          ...(query.keyword
+            ? {
                 OR: [
                   { batchNo: { contains: query.keyword } },
                   { order: { orderNo: { contains: query.keyword } } },
                   { order: { model: { contains: query.keyword } } },
                 ],
-              },
-            },
-          }
-        : {}),
+              }
+            : {}),
+        },
+      },
     }
     const [records, total, aggregate] = await this.prisma.$transaction([
       this.prisma.transfer.findMany({
@@ -40,6 +43,8 @@ export class SurplusService {
       this.prisma.processTask.aggregate({
         where: {
           workstation: { terminalKind: 'SURPLUS' },
+          deletedAt: null,
+          batch: { deletedAt: null, order: { deletedAt: null } },
           incomingTransfers: { some: where },
         },
         _sum: { completedQuantity: true },

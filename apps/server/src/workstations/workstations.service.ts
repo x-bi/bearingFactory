@@ -66,7 +66,11 @@ export class WorkstationsService {
       include: {
         process: true,
         tasks: {
-          where: { status: { in: ['PROCESSING', 'PAUSED', 'PENDING'] } },
+          where: {
+            deletedAt: null,
+            batch: { deletedAt: null, order: { deletedAt: null } },
+            status: { in: ['PROCESSING', 'PAUSED', 'PENDING'] },
+          },
           orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
           include: {
             process: true,
@@ -90,7 +94,11 @@ export class WorkstationsService {
           station.terminalKind === 'SURPLUS'
             ? ((
                 await this.prisma.processTask.aggregate({
-                  where: { workstationId: station.id },
+                  where: {
+                    workstationId: station.id,
+                    deletedAt: null,
+                    batch: { deletedAt: null, order: { deletedAt: null } },
+                  },
                   _sum: { completedQuantity: true },
                 })
               )._sum.completedQuantity ?? 0)
@@ -135,6 +143,8 @@ export class WorkstationsService {
     const stationTasks = await this.prisma.processTask.findMany({
       where: {
         workstationId: id,
+        deletedAt: null,
+        batch: { deletedAt: null, order: { deletedAt: null } },
         ...(station.terminalKind === 'SURPLUS'
           ? {}
           : { status: { not: 'COMPLETED' } }),
@@ -143,7 +153,7 @@ export class WorkstationsService {
       include: {
         process: true,
         batch: { include: { order: true } },
-        outgoingTransfers: true,
+        outgoingTransfers: { where: { deletedAt: null } },
       },
     })
 
